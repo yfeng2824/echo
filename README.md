@@ -15,12 +15,17 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 ## Current Features
 
 - Full-screen world map as the default view
-- Clean default URL for the map; `#node` for the focused node view
+- Hash-based scene routing with `#node` for the focused node view
 - Clickable nodes on the map
+- Minimal map overlay with a search field only
 - Right-side node details only in the node view
 - 20-node mock network with connected channels
 - Map ambient bed with distributed node-trigger pulses and ripples
-- Selected-node local resonance behavior
+- Selected-node local resonance behavior with a centered main node and scattered direct peers
+- Thin connection lines between the selected node and direct peers
+- Collision echoes in the node scene with secondary rings and capped recursion via `rippleLayer`
+- Visible node IDs rendered as derived truncated hexadecimal values while internal graph IDs stay unchanged
+- Copy-to-clipboard action for node IDs with overlay feedback
 - Minimal black-and-white UI with sound toggle and density control
 
 ## Project Structure
@@ -49,10 +54,13 @@ The default `dev` script starts the web app workspace.
 - Rendering is still canvas-based, not Pixi yet
 - Live Fiber ingestion is not implemented yet
 - The sonic system is fixed to a D pentatonic, guqin-inspired design
+- The map search field is present, but does not currently open a visible result list
+- The node scene reseeds peer layout on entry so repeated visits feel different
+- Collision-generated echo rings are capped to prevent noisy feedback loops
 
 ## Next Steps
 
+- Wire the map search field to filtering or direct navigation
 - Replace the canvas renderer with Pixi scenes
 - Connect to real Fiber-backed data
 - Continue tuning sound density, resonance timing, and scene feel
-

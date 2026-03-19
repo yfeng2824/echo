@@ -15,9 +15,10 @@ const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
   4: ["gong", "shang", "zhi", "yu"]
 };
 
-const RESONANCE_PEER_DEGREES: DegreeHint[] = ["shang", "jue", "yu"];
+const RESONANCE_PEER_DEGREES: DegreeHint[] = ["shang", "jue", "yu", "zhi"];
 
 function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBand> {
+  // Higher degree nodes are lifted into higher registers across the fixed pentatonic pool.
   const liveNodes = nodes
     .filter((node) => node.status === "live")
     .sort((left, right) => {
@@ -168,6 +169,7 @@ export function App() {
 
         const batchId = `ambient-${Date.now()}`;
 
+        // Keep the map view feeling distributed by letting a small batch speak together.
         batchNodes.forEach((node, index) => {
           const event: EchoEvent = {
             id: `${batchId}-${index}-${node.id}`,
@@ -210,78 +212,59 @@ export function App() {
     }
 
     const peerNodes = nodes.filter((node) => selectedNode.peers.includes(node.id));
+    const localNodes = [selectedNode, ...peerNodes];
     const registerBandMap = buildRegisterBandMap(nodes);
-    let timeoutIds: number[] = [];
+    let timeoutId = 0;
 
     const schedulePhrase = () => {
       const phraseDelay =
         audioSettings.density === "rich"
-          ? 1500 + Math.random() * 900
+          ? 1400 + Math.random() * 700
           : audioSettings.density === "balanced"
-            ? 1900 + Math.random() * 1100
-            : 2300 + Math.random() * 1400;
+            ? 1750 + Math.random() * 850
+            : 2100 + Math.random() * 1000;
 
-        const phraseTimer = window.setTimeout(() => {
-          const timestamp = new Date().toISOString();
-          const batchId = `resonance-${Date.now()}`;
+      timeoutId = window.setTimeout(() => {
+        const timestamp = new Date().toISOString();
+        const batchId = `resonance-${Date.now()}`;
         const anchorDegree: DegreeHint = Math.random() > 0.55 ? "gong" : "zhi";
-        const anchorEvent: EchoEvent = {
-          id: `${batchId}-anchor-${selectedNode.id}`,
-          type: "node_active",
-          at: timestamp,
-          nodeId: selectedNode.id,
-          intensity: Math.min(1, 0.55 + selectedNode.intensity * 0.6),
-          voiceIndex: 0,
-          voiceCount: 1,
-          registerBand: registerBandMap.get(selectedNode.id) ?? 1,
-          degreeHint: anchorDegree,
-          batchId,
-          batchRole: "lead",
-          source: "resonance"
-        };
 
-        appendEvent(anchorEvent);
-        audio.trigger(anchorEvent);
+        // Fire the local field as a single breath so audio and collision visuals stay aligned.
+        localNodes.forEach((node, index) => {
+          const event: EchoEvent = {
+            id: `${batchId}-${index}-${node.id}`,
+            type: "node_active",
+            at: timestamp,
+            nodeId: node.id,
+            intensity:
+              node.id === selectedNode.id
+                ? Math.min(1, 0.58 + node.intensity * 0.62)
+                : Math.min(0.86, 0.34 + node.intensity * 0.46),
+            voiceIndex: index,
+            voiceCount: localNodes.length,
+            registerBand: registerBandMap.get(node.id) ?? 1,
+            degreeHint:
+              node.id === selectedNode.id
+                ? anchorDegree
+                : RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length],
+            batchId,
+            batchRole:
+              index === 0 ? "lead" : index === localNodes.length - 1 ? "tail" : "support",
+            source: "resonance"
+          };
 
-        const maxPeerVoices =
-          audioSettings.density === "rich" ? 3 : audioSettings.density === "balanced" ? 2 : 1;
-        const shuffledPeers = [...peerNodes].sort(() => Math.random() - 0.5).slice(0, maxPeerVoices);
-
-        shuffledPeers.forEach((peerNode, index) => {
-          const responseTimer = window.setTimeout(() => {
-            const peerEvent: EchoEvent = {
-              id: `${batchId}-peer-${index}-${peerNode.id}`,
-              type: "node_active",
-              at: new Date().toISOString(),
-              nodeId: peerNode.id,
-              intensity: Math.min(0.92, 0.3 + peerNode.intensity * 0.5),
-              voiceIndex: index + 1,
-              voiceCount: shuffledPeers.length + 1,
-              registerBand: registerBandMap.get(peerNode.id) ?? 1,
-              degreeHint: RESONANCE_PEER_DEGREES[index % RESONANCE_PEER_DEGREES.length],
-              batchId,
-              batchRole: index === shuffledPeers.length - 1 ? "tail" : "support",
-              source: "resonance"
-            };
-
-            appendEvent(peerEvent);
-            audio.trigger(peerEvent);
-          }, 120 + index * 80 + Math.random() * 80);
-
-          timeoutIds.push(responseTimer);
+          appendEvent(event);
+          audio.trigger(event);
         });
 
         schedulePhrase();
       }, phraseDelay);
-
-      timeoutIds.push(phraseTimer);
     };
 
     schedulePhrase();
 
     return () => {
-      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
-      timeoutIds = [];
+      window.clearTimeout(timeoutId);
     };
   }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, nodes, selectedNodeId]);
 
