@@ -1,0 +1,21 @@
+.scene-chrome {
+  width: min(1100px, calc(100% - 4rem));
+  margin: 0 auto;
+  padding: 1.5rem 0 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.scene-chrome__title {
+  font-size: 0.95rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #7ea7db;
+}
+
+.scene-chrome__meta {
+  color: #b7c7e0;
+}
+

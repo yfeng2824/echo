@@ -1,0 +1,117 @@
+.scene {
+  padding: 2rem;
+}
+
+.scene__panel {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding: 1.5rem;
+  border: 1px solid rgba(140, 190, 255, 0.2);
+  border-radius: 24px;
+  background: rgba(6, 12, 24, 0.72);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
+}
+
+.scene__eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.8rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7ea7db;
+}
+
+.scene__title {
+  margin: 0;
+  font-size: clamp(2rem, 4vw, 3.5rem);
+  line-height: 1.05;
+}
+
+.scene__description {
+  max-width: 56rem;
+  margin: 1rem 0 0;
+  color: #b7c7e0;
+}
+
+.scene__grid {
+  display: grid;
+  gap: 1rem;
+  margin-top: 2rem;
+}
+
+.scene__grid--two {
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+}
+
+.scene__card {
+  padding: 1rem;
+  border-radius: 18px;
+  background: rgba(13, 22, 39, 0.9);
+  border: 1px solid rgba(140, 190, 255, 0.14);
+}
+
+.scene__label {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: #7ea7db;
+  font-size: 0.78rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scene__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin-top: 1.5rem;
+}
+
+.scene__button {
+  padding: 0.75rem 1rem;
+  border: 1px solid rgba(140, 190, 255, 0.22);
+  border-radius: 999px;
+  background: rgba(23, 38, 64, 0.8);
+  color: #ebf2ff;
+  cursor: pointer;
+}
+
+.scene__button:hover {
+  background: rgba(37, 58, 94, 0.96);
+}
+
+.scene__node-list {
+  display: grid;
+  gap: 0.75rem;
+  margin-top: 1.25rem;
+}
+
+.scene__node-button {
+  width: 100%;
+  padding: 0.9rem 1rem;
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid rgba(140, 190, 255, 0.16);
+  border-radius: 16px;
+  background: rgba(8, 17, 31, 0.82);
+  color: inherit;
+  cursor: pointer;
+  text-align: left;
+}
+
+.scene__node-button:hover {
+  border-color: rgba(140, 190, 255, 0.28);
+}
+
+.scene__dot {
+  width: 0.7rem;
+  height: 0.7rem;
+  border-radius: 999px;
+  background: #84baff;
+  box-shadow: 0 0 18px rgba(132, 186, 255, 0.9);
+}
+
+.scene__meta {
+  color: #9cb1d3;
+  font-size: 0.92rem;
+}
+
