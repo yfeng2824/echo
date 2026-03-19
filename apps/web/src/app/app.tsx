@@ -6,7 +6,8 @@ import { createAudioEngine } from "../engine/audio/audio-engine";
 import { createNetworkSimulation } from "../engine/simulation/network-simulation";
 import { mockChannels, mockNodes } from "../data/mock/network";
 import { mockEvents } from "../data/mock/events";
-import type { DegreeHint, EchoEvent, EchoNode, RegisterBand } from "@echo/contracts";
+import { buildRegisterBandMap } from "../lib/network";
+import type { BatchRole, DegreeHint, EchoEvent } from "@echo/contracts";
 
 const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
   1: ["gong"],
@@ -17,28 +18,16 @@ const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
 
 const RESONANCE_PEER_DEGREES: DegreeHint[] = ["shang", "jue", "yu", "zhi"];
 
-function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBand> {
-  // Higher degree nodes are lifted into higher registers across the fixed pentatonic pool.
-  const liveNodes = nodes
-    .filter((node) => node.status === "live")
-    .sort((left, right) => {
-      const degreeDelta = left.peers.length - right.peers.length;
-      if (degreeDelta !== 0) {
-        return degreeDelta;
-      }
+function getBatchRole(index: number, voiceCount: number): BatchRole {
+  if (index === 0) {
+    return "lead";
+  }
 
-      return left.id.localeCompare(right.id);
-    });
+  if (index === voiceCount - 1) {
+    return "tail";
+  }
 
-  const bandMap = new Map<string, RegisterBand>();
-
-  liveNodes.forEach((node, index) => {
-    const normalized = liveNodes.length > 1 ? index / (liveNodes.length - 1) : 0;
-    const band = Math.min(4, Math.floor(normalized * 4) + 1) as RegisterBand;
-    bandMap.set(node.id, band);
-  });
-
-  return bandMap;
+  return "support";
 }
 
 export function App() {
@@ -47,11 +36,13 @@ export function App() {
   const initialize = useAppStore((state) => state.initialize);
   const appendEvent = useAppStore((state) => state.appendEvent);
   const activeScene = useAppStore((state) => state.activeScene);
+  const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const nodes = useAppStore((state) => state.nodes);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const audio = useAppStore((state) => state.audio);
   const audioEnabled = useAppStore((state) => state.audioEnabled);
   const audioSettings = useAppStore((state) => state.audioSettings);
+  const isSearchFocusPhase = activeScene === "map" && mapSearchTransition !== null;
 
   useEffect(() => {
     const simulation = createNetworkSimulation({
@@ -72,6 +63,8 @@ export function App() {
       const currentState = useAppStore.getState();
       const currentBandMap = buildRegisterBandMap(currentState.nodes);
       const selectedNode = currentState.nodes.find((node) => node.id === currentState.selectedNodeId);
+      const isCurrentSearchFocusPhase =
+        currentState.activeScene === "map" && currentState.mapSearchTransition !== null;
       const canPlayInNodeScene =
         currentState.activeScene === "node" &&
         selectedNode &&
@@ -85,7 +78,7 @@ export function App() {
       };
 
       appendEvent(enrichedEvent);
-      if (currentState.activeScene === "map" || canPlayInNodeScene) {
+      if ((!isCurrentSearchFocusPhase && currentState.activeScene === "map") || canPlayInNodeScene) {
         audio.trigger(enrichedEvent);
       }
     });
@@ -105,11 +98,35 @@ export function App() {
       return;
     }
 
-    audio?.syncAmbient(activeScene, nodes);
-  }, [activeScene, audio, audioEnabled, audioSettings, nodes]);
+    audio?.syncAmbient(isSearchFocusPhase ? "node" : activeScene, nodes);
+  }, [activeScene, audio, audioEnabled, audioSettings, isSearchFocusPhase, nodes]);
 
   useEffect(() => {
-    if (!audioEnabled || activeScene !== "map" || !audio) {
+    if (!mapSearchTransition) {
+      return;
+    }
+
+    const registerBandMap = buildRegisterBandMap(nodes);
+    const foundEvent: EchoEvent = {
+      id: `found-${mapSearchTransition.nodeId}-${mapSearchTransition.startedAt}`,
+      type: "node_active",
+      at: new Date(mapSearchTransition.startedAt).toISOString(),
+      nodeId: mapSearchTransition.nodeId,
+      intensity: 0.96,
+      registerBand: registerBandMap.get(mapSearchTransition.nodeId) ?? 1,
+      degreeHint: "jue",
+      batchRole: "lead",
+      source: "network"
+    };
+
+    appendEvent(foundEvent);
+    if (audioEnabled) {
+      audio?.trigger(foundEvent);
+    }
+  }, [appendEvent, audio, audioEnabled, mapSearchTransition, nodes]);
+
+  useEffect(() => {
+    if (!audioEnabled || activeScene !== "map" || !audio || isSearchFocusPhase) {
       return;
     }
 
@@ -182,7 +199,7 @@ export function App() {
             registerBand: registerBandMap.get(node.id) ?? 1,
             degreeHint: AMBIENT_DEGREES[batchNodes.length]?.[index],
             batchId,
-            batchRole: index === 0 ? "lead" : index === batchNodes.length - 1 ? "tail" : "support",
+            batchRole: getBatchRole(index, batchNodes.length),
             source: "ambient"
           };
 
@@ -199,7 +216,7 @@ export function App() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, nodes]);
+  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, isSearchFocusPhase, nodes]);
 
   useEffect(() => {
     if (!audioEnabled || activeScene !== "node" || !audio || !selectedNodeId) {
@@ -248,8 +265,7 @@ export function App() {
                 ? anchorDegree
                 : RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length],
             batchId,
-            batchRole:
-              index === 0 ? "lead" : index === localNodes.length - 1 ? "tail" : "support",
+            batchRole: getBatchRole(index, localNodes.length),
             source: "resonance"
           };
 

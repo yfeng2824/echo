@@ -15,6 +15,8 @@
 - Keep interaction separate from rendering
 - Keep audio separate from rendering
 - Keep shared types in `packages/contracts`
+- Avoid cut-style transitions
+- Shared logic should live in reusable helpers under `apps/web/src/lib`
 - Visible node IDs use a derived truncated hexadecimal display format; internal graph IDs must stay unchanged
 - Collision echoes in the node scene must remain capped with the `rippleLayer` recursion limit
 

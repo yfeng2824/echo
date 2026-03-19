@@ -81,6 +81,8 @@ function getVisualProfile(event: EchoEvent, scene: "map" | "node") {
 export function RenderSurface() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const activeScene = useAppStore((state) => state.activeScene);
+  const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
+  const nodeSceneEnteredAt = useAppStore((state) => state.nodeSceneEnteredAt);
   const nodes = useAppStore((state) => state.nodes);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const recentEvents = useAppStore((state) => state.recentEvents);
@@ -163,6 +165,30 @@ export function RenderSurface() {
       };
     };
 
+    const drawWorldMapDots = (alpha: number) => {
+      if (alpha <= 0.01) {
+        return;
+      }
+
+      const { mapWidth, mapHeight, offsetX, offsetY } = getMapLayout();
+
+      context.fillStyle = `rgba(255, 255, 255, ${0.16 * alpha})`;
+      context.beginPath();
+      for (let y = 0; y < WORLD_ASCII.length; y += 1) {
+        const row = WORLD_ASCII[y];
+        for (let x = 0; x < row.length; x += 1) {
+          if (row[x] !== "#") {
+            continue;
+          }
+
+          const px = Math.round(offsetX + (x / 79) * mapWidth);
+          const py = Math.round(offsetY + (y / 26) * mapHeight);
+          context.rect(px, py, 2, 2);
+        }
+      }
+      context.fill();
+    };
+
     const hashString = (value: string) => {
       let hash = 0;
 
@@ -178,6 +204,9 @@ export function RenderSurface() {
       return value - Math.floor(value);
     };
 
+    const getNodeEvents = (nodeId: string) =>
+      recentEventsRef.current.filter((event) => event.nodeId === nodeId);
+
     const findNodeAtPoint = (clientX: number, clientY: number) => {
       for (const node of nodes) {
         const { x, y } = getMapPosition(node.lat, node.lng);
@@ -191,33 +220,40 @@ export function RenderSurface() {
     };
 
     const drawMap = (time: number) => {
-      const { width, height, mapWidth, mapHeight, offsetX, offsetY } = getMapLayout();
+      const { width, height } = getMapLayout();
       const now = Date.now();
+      const transitionNode = mapSearchTransition
+        ? nodes.find((node) => node.id === mapSearchTransition.nodeId) ?? null
+        : null;
+      const transitionProgress = mapSearchTransition
+        ? Math.min(1, (now - mapSearchTransition.startedAt) / 950)
+        : 0;
+      const easedFocus = 1 - Math.pow(1 - transitionProgress, 3);
+      const transitionPosition = transitionNode
+        ? getMapPosition(transitionNode.lat, transitionNode.lng)
+        : null;
+      const focusDrift = transitionPosition
+        ? {
+            x: (width / 2 - transitionPosition.x) * easedFocus * 0.34,
+            y: (height / 2 - transitionPosition.y) * easedFocus * 0.34
+          }
+        : { x: 0, y: 0 };
 
       context.fillStyle = "#000";
       context.fillRect(0, 0, width, height);
-
-      context.fillStyle = "rgba(255, 255, 255, 0.16)";
-      context.beginPath();
-      for (let y = 0; y < WORLD_ASCII.length; y += 1) {
-        const row = WORLD_ASCII[y];
-        for (let x = 0; x < row.length; x += 1) {
-          if (row[x] !== "#") {
-            continue;
-          }
-
-          const px = Math.round(offsetX + (x / 79) * mapWidth);
-          const py = Math.round(offsetY + (y / 26) * mapHeight);
-          context.rect(px, py, 2, 2);
-        }
-      }
-      context.fill();
+      context.save();
+      context.translate(focusDrift.x, focusDrift.y);
+      context.translate(width / 2, height / 2);
+      context.scale(1 + easedFocus * 0.14, 1 + easedFocus * 0.14);
+      context.translate(-width / 2, -height / 2);
+      drawWorldMapDots(1);
 
       nodes.forEach((node, index) => {
         const rawPosition = getMapPosition(node.lat, node.lng);
         const x = Math.round(rawPosition.x);
         const y = Math.round(rawPosition.y);
-        const nodeEvents = recentEventsRef.current.filter((event) => event.nodeId === node.id);
+        const nodeEvents = getNodeEvents(node.id);
+        const isTransitionNode = transitionNode?.id === node.id;
         const activeRipples = nodeEvents
           .map((event) => {
             const profile = getVisualProfile(event, "map");
@@ -238,17 +274,34 @@ export function RenderSurface() {
           progress: number;
           profile: ReturnType<typeof getVisualProfile>;
         }>;
-        const pulseEnergy = activeRipples.reduce(
+        const visibleRipples = transitionNode
+          ? isTransitionNode
+            ? activeRipples.slice(0, 1)
+            : []
+          : activeRipples;
+        const pulseEnergy = visibleRipples.reduce(
           (sum, ripple) => sum + (1 - ripple.progress) * ripple.intensity,
           0
         );
-        const pulse = Math.max(0.12, Math.min(1.4, pulseEnergy));
+        const pulse = transitionNode
+          ? isTransitionNode
+            ? Math.max(0.22, Math.min(1.7, pulseEnergy + easedFocus * 0.4))
+            : 0
+          : Math.max(0.12, Math.min(1.4, pulseEnergy));
         const isHovered = hoveredNodeId === node.id;
-        const halo = 6 + Math.sin(time * 0.001 + index) * 2 + pulse * 16 + (isHovered ? 5 : 0);
+        const halo =
+          6 +
+          (transitionNode ? 0 : Math.sin(time * 0.001 + index) * 2) +
+          pulse * 16 +
+          (isHovered ? 5 : 0) +
+          (isTransitionNode ? easedFocus * 20 : 0);
 
-        activeRipples.forEach((ripple) => {
+        visibleRipples.forEach((ripple) => {
           const rippleRadius = 8 + ripple.progress * ripple.profile.radius;
-          const rippleAlpha = (1 - ripple.progress) * ripple.profile.alpha;
+          const rippleAlpha =
+            (1 - ripple.progress) *
+            ripple.profile.alpha *
+            (isTransitionNode ? 0.45 : 1);
 
           context.beginPath();
           context.arc(x + 0.5, y + 0.5, rippleRadius, 0, Math.PI * 2);
@@ -257,22 +310,46 @@ export function RenderSurface() {
           context.stroke();
         });
 
+        if (isTransitionNode) {
+          const highlightRadius = 12 + easedFocus * 58;
+          context.beginPath();
+          context.arc(x, y, highlightRadius, 0, Math.PI * 2);
+          context.fillStyle = `rgba(255, 255, 255, ${0.08 + easedFocus * 0.2})`;
+          context.fill();
+
+          context.beginPath();
+          context.arc(x + 0.5, y + 0.5, 22 + easedFocus * 52, 0, Math.PI * 2);
+          context.strokeStyle = `rgba(255, 255, 255, ${0.18 + easedFocus * 0.16})`;
+          context.lineWidth = 1.8;
+          context.stroke();
+        }
+
         context.beginPath();
         context.arc(x, y, halo, 0, Math.PI * 2);
-        context.fillStyle = `rgba(255, 255, 255, ${0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0)})`;
+        context.fillStyle = transitionNode
+          ? isTransitionNode
+            ? `rgba(255, 255, 255, ${0.06 + pulse * 0.12})`
+            : "rgba(255, 255, 255, 0.02)"
+          : `rgba(255, 255, 255, ${0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0)})`;
         context.fill();
 
         context.beginPath();
         context.arc(x, y, (isHovered ? 4 : 3) + Math.min(2, pulse * 1.5), 0, Math.PI * 2);
-        context.fillStyle = "rgba(255, 255, 255, 0.85)";
+        context.fillStyle = transitionNode
+          ? isTransitionNode
+            ? "rgba(255, 255, 255, 0.96)"
+            : "rgba(255, 255, 255, 0.34)"
+          : "rgba(255, 255, 255, 0.85)";
         context.fill();
 
-        if (isHovered) {
+        if (!transitionNode && isHovered) {
           context.fillStyle = "rgba(255, 255, 255, 0.7)";
           context.font = '10px "Inter", sans-serif';
           context.fillText(getDisplayNodeId(node.id), x + halo + 6, y + 3);
         }
       });
+
+      context.restore();
     };
 
     const drawLocal = (time: number) => {
@@ -282,9 +359,19 @@ export function RenderSurface() {
       const centerY = Math.round(height / 2);
       const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
       const now = Date.now();
+      const entryProgress = nodeSceneEnteredAt
+        ? Math.min(1, (now - nodeSceneEnteredAt) / 1100)
+        : 1;
+      const entryEase = 1 - Math.pow(1 - entryProgress, 3);
+      const peerEntryProgress = Math.max(0, Math.min(1, (entryProgress - 0.16) / 0.84));
+      const peerEntryEase = 1 - Math.pow(1 - peerEntryProgress, 3);
+      const lineEntryProgress = Math.max(0, Math.min(1, (entryProgress - 0.32) / 0.68));
+      const lineEntryEase = 1 - Math.pow(1 - lineEntryProgress, 3);
+      const mapFade = 1 - entryEase;
 
       context.fillStyle = "#000";
       context.fillRect(0, 0, width, height);
+      drawWorldMapDots(mapFade);
 
       if (!selectedNode) {
         return;
@@ -294,12 +381,19 @@ export function RenderSurface() {
       const localNodes = [selectedNode, ...peers];
       const baseRadius = Math.min(width, height) * 0.31;
       const layout = new Map<string, { x: number; y: number; size: number; events: EchoEvent[] }>();
+      const selectedMapPosition = getMapPosition(selectedNode.lat, selectedNode.lng);
+      const anchorX = Math.round(
+        selectedMapPosition.x + (centerX - selectedMapPosition.x) * entryEase
+      );
+      const anchorY = Math.round(
+        selectedMapPosition.y + (centerY - selectedMapPosition.y) * entryEase
+      );
 
       layout.set(selectedNode.id, {
-        x: centerX,
-        y: centerY,
-        size: 8,
-        events: recentEventsRef.current.filter((event) => event.nodeId === selectedNode.id)
+        x: anchorX,
+        y: anchorY,
+        size: 3 + entryEase * 5,
+        events: getNodeEvents(selectedNode.id)
       });
 
       peers.forEach((peer, index) => {
@@ -313,14 +407,14 @@ export function RenderSurface() {
           angleJitter +
           orbitBias * 0.01;
         const radius = baseRadius * radialJitter;
-        const x = Math.round(centerX + Math.cos(angle) * radius);
-        const y = Math.round(centerY + Math.sin(angle) * radius);
+        const x = Math.round(anchorX + Math.cos(angle) * radius * peerEntryEase);
+        const y = Math.round(anchorY + Math.sin(angle) * radius * peerEntryEase);
 
         layout.set(peer.id, {
           x,
           y,
           size: 4,
-          events: recentEventsRef.current.filter((event) => event.nodeId === peer.id)
+          events: getNodeEvents(peer.id)
         });
       });
 
@@ -332,9 +426,9 @@ export function RenderSurface() {
         }
 
         context.beginPath();
-        context.moveTo(centerX + 0.5, centerY + 0.5);
+        context.moveTo(anchorX + 0.5, anchorY + 0.5);
         context.lineTo(peerLayout.x + 0.5, peerLayout.y + 0.5);
-        context.strokeStyle = "rgba(255, 255, 255, 0.1)";
+        context.strokeStyle = `rgba(255, 255, 255, ${lineEntryEase * 0.1})`;
         context.lineWidth = 1;
         context.stroke();
       });
@@ -381,10 +475,12 @@ export function RenderSurface() {
           0
         );
         const pulse = Math.max(0.14, Math.min(1.5, pulseEnergy));
+        const nodeEntryScale =
+          node.id === selectedNode.id ? 0.8 + entryEase * 0.9 : 0.08 + peerEntryEase * 0.92;
         const haloSize =
           node.id === selectedNode.id
-            ? 22 + pulse * 28 + Math.sin(time * 0.001 + index) * 2
-            : 11 + pulse * 14 + Math.sin(time * 0.001 + index) * 1.2;
+            ? (18 + pulse * 28 + Math.sin(time * 0.001 + index) * 2) * (0.95 + entryEase * 0.3)
+            : (11 + pulse * 14 + Math.sin(time * 0.001 + index) * 1.2) * nodeEntryScale;
 
         activeNodeRipples.forEach((ripple) => {
           const rippleRadius = 12 + ripple.progress * ripple.profile.radius;
@@ -403,7 +499,9 @@ export function RenderSurface() {
 
           context.beginPath();
           context.arc(nodeLayout.x + 0.5, nodeLayout.y + 0.5, rippleRadius, 0, Math.PI * 2);
-          context.strokeStyle = `rgba(255, 255, 255, ${rippleAlpha})`;
+          context.strokeStyle = `rgba(255, 255, 255, ${
+            rippleAlpha * (node.id === selectedNode.id ? 1 : peerEntryEase)
+          })`;
           context.lineWidth = node.id === selectedNode.id ? 2.4 : 1.8;
           context.stroke();
         });
@@ -412,19 +510,24 @@ export function RenderSurface() {
         context.arc(nodeLayout.x, nodeLayout.y, haloSize, 0, Math.PI * 2);
         context.fillStyle =
           node.id === selectedNode.id
-            ? `rgba(255, 255, 255, ${0.04 + pulse * 0.11})`
-            : `rgba(255, 255, 255, ${0.025 + pulse * 0.075})`;
+            ? `rgba(255, 255, 255, ${0.05 + pulse * 0.12})`
+            : `rgba(255, 255, 255, ${(0.025 + pulse * 0.075) * peerEntryEase})`;
         context.fill();
 
         context.beginPath();
         context.arc(
           nodeLayout.x,
           nodeLayout.y,
-          node.id === selectedNode.id ? nodeLayout.size + pulse * 2.4 : nodeLayout.size + pulse,
+          (node.id === selectedNode.id
+            ? nodeLayout.size + pulse * 2.4
+            : nodeLayout.size + pulse) * nodeEntryScale,
           0,
           Math.PI * 2
         );
-        context.fillStyle = "rgba(255, 255, 255, 0.9)";
+        context.fillStyle =
+          node.id === selectedNode.id
+            ? "rgba(255, 255, 255, 0.94)"
+            : `rgba(255, 255, 255, ${0.9 * peerEntryEase})`;
         context.fill();
       });
 
@@ -588,7 +691,7 @@ export function RenderSurface() {
       canvas.style.cursor = "default";
       window.cancelAnimationFrame(animationFrame);
     };
-  }, [activeScene, nodes, selectNode, selectedNodeId]);
+  }, [activeScene, mapSearchTransition, nodeSceneEnteredAt, nodes, selectNode, selectedNodeId]);
 
   return <canvas ref={canvasRef} className="render-surface" aria-hidden="true" />;
 }
