@@ -17,6 +17,9 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 - Full-screen world map as the default view
 - Hash-based scene routing with `#node` for the focused node view
 - Clickable nodes on the map
+- Search by node ID
+- Empty state overlay for unmatched search
+- Node-to-local-view transition carries the selected node into the focused scene
 - Minimal map overlay with a search field only
 - Right-side node details only in the node view
 - 20-node mock network with connected channels
@@ -34,6 +37,7 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 apps/
   api/        Backend placeholder for ingest and live streaming
   web/        UI, scenes, state, canvas renderer, and audio engine
+    src/lib/  Shared helpers for node IDs, queries, and reusable client logic
 packages/
   contracts/  Shared types for nodes, channels, events, and audio metadata
 ```
@@ -60,7 +64,6 @@ The default `dev` script starts the web app workspace.
 
 ## Next Steps
 
-- Wire the map search field to filtering or direct navigation
 - Replace the canvas renderer with Pixi scenes
 - Connect to real Fiber-backed data
 - Continue tuning sound density, resonance timing, and scene feel

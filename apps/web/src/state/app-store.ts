@@ -19,6 +19,13 @@ type InitializeInput = {
 type AppState = {
   activeScene: SceneId;
   selectedNodeId: string | null;
+  nodeSceneEnteredAt: number | null;
+  mapSearchTransition:
+    | {
+        nodeId: string;
+        startedAt: number;
+      }
+    | null;
   audioEnabled: boolean;
   audioSettings: AudioSettings;
   nodes: EchoNode[];
@@ -30,6 +37,8 @@ type AppState = {
   appendEvent: (event: EchoEvent) => void;
   setScene: (scene: SceneId) => void;
   selectNode: (nodeId: string) => void;
+  startMapSearchTransition: (nodeId: string) => void;
+  clearMapSearchTransition: () => void;
   goToMap: () => void;
   setAudioSettings: (nextSettings: Partial<AudioSettings>) => void;
   toggleAudio: () => void;
@@ -43,6 +52,8 @@ const defaultAudioSettings: AudioSettings = {
 export const useAppStore = create<AppState>((set, get) => ({
   activeScene: "map",
   selectedNodeId: null,
+  nodeSceneEnteredAt: null,
+  mapSearchTransition: null,
   audioEnabled: false,
   audioSettings: defaultAudioSettings,
   nodes: [],
@@ -68,10 +79,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeScene: scene });
   },
   selectNode: (nodeId) => {
-    set({ selectedNodeId: nodeId, activeScene: "node" });
+    set({
+      selectedNodeId: nodeId,
+      activeScene: "node",
+      nodeSceneEnteredAt: Date.now(),
+      mapSearchTransition: null
+    });
+  },
+  startMapSearchTransition: (nodeId) => {
+    set({
+      selectedNodeId: nodeId,
+      mapSearchTransition: {
+        nodeId,
+        startedAt: Date.now()
+      }
+    });
+  },
+  clearMapSearchTransition: () => {
+    set({ mapSearchTransition: null });
   },
   goToMap: () => {
-    set({ activeScene: "map" });
+    set({ activeScene: "map", nodeSceneEnteredAt: null, mapSearchTransition: null });
   },
   setAudioSettings: (nextSettings) => {
     set((state) => ({
