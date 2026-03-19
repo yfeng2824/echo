@@ -29,10 +29,15 @@ export function useSceneRouting() {
   }, [setScene]);
 
   useEffect(() => {
-    const nextHash = activeScene === "node" ? "#node" : "#map";
-    if (window.location.hash !== nextHash) {
-      window.location.hash = nextHash;
+    if (activeScene === "node") {
+      if (window.location.hash !== "#node") {
+        window.location.hash = "#node";
+      }
+      return;
+    }
+
+    if (window.location.hash !== "#map") {
+      window.location.hash = "#map";
     }
   }, [activeScene]);
 }
-
