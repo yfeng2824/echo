@@ -145,6 +145,7 @@ export function createAudioEngine(): AudioEngine {
     const registerBand = event.registerBand ?? topologyBands.get(event.nodeId) ?? 1;
     const excludedDegrees: DegreeHint[] = [];
 
+    // Batch events prefer open pentatonic voicings before falling back to weighted choice.
     if (event.voiceCount && event.voiceCount > 1 && typeof event.voiceIndex === "number") {
       const batchDegrees = CHORD_PRIORITY[Math.min(event.voiceCount, 4)];
       if (event.degreeHint) {
@@ -190,7 +191,7 @@ export function createAudioEngine(): AudioEngine {
 
   const getVoiceLimit = (source: EchoEvent["source"]) => {
     if (source === "resonance") {
-      return 4;
+      return 8;
     }
 
     return 3;
@@ -273,6 +274,7 @@ export function createAudioEngine(): AudioEngine {
       rootFrequency * Math.pow(2, DEGREE_TO_SEMITONE[supportDegree] / 12)
     ];
 
+    // The map bed stays to two quiet voices so discrete node triggers remain audible.
     ambientMaster = context.createGain();
     ambientMaster.gain.setValueAtTime(0.0001, context.currentTime);
     ambientMaster.connect(context.destination);
@@ -346,6 +348,7 @@ export function createAudioEngine(): AudioEngine {
       (batchRole === "lead" ? 1.15 : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
 
+    // Blend a short pluck, a resonant body, and a faint airy tail for the guqin-inspired voice.
     const data = airBuffer.getChannelData(0);
     for (let index = 0; index < data.length; index += 1) {
       data[index] = (Math.random() * 2 - 1) * 0.16;

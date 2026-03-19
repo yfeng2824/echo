@@ -29,4 +29,6 @@ export type EchoEvent = {
   batchId?: string;
   batchRole?: BatchRole;
   source?: EventSource;
+  // Collision echoes increment this so the node scene can cap recursive ripples.
+  rippleLayer?: number;
 };
