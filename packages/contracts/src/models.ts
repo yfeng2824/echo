@@ -2,6 +2,15 @@ export type SceneId = "map" | "node";
 
 export type EchoNodeStatus = "live" | "quiet";
 
+export type AudioDensity = "sparse" | "balanced" | "rich";
+
+export type AudioTimbrePreset = "guqin";
+
+export type AudioSettings = {
+  density: AudioDensity;
+  timbrePreset: AudioTimbrePreset;
+};
+
 export type EchoNode = {
   id: string;
   label: string;
@@ -20,4 +29,3 @@ export type EchoChannel = {
   strength: number;
   lastActiveAt: string;
 };
-

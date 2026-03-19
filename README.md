@@ -1,53 +1,58 @@
 # Echo
 
-Echo is a visual + motion demo for the Fiber network.
+Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-screen world map that shows distributed network activity, and a node-focused resonance view that narrows attention to one node and its connected peers.
 
-## Stack
+## Current Stack
 
-- Frontend: React + TypeScript + Vite
-- State: Zustand
-- Planned rendering engine: PixiJS
-- Planned motion layer: Motion
-- Planned audio layer: Tone.js
-- Shared contracts: workspace package
-- Planned backend: Fastify adapter over Fiber/dashboard or explorer APIs
+- React + TypeScript + Vite
+- Zustand
+- Shared contracts package in `packages/contracts`
+- Current rendering: custom canvas renderer
+- Planned rendering upgrade: PixiJS
+- Current audio: custom Web Audio guqin-inspired system
+- Planned backend: thin adapter over Fiber/dashboard or explorer APIs
 
-## Project structure
+## Current Features
+
+- Full-screen world map as the default view
+- Clean default URL for the map; `#node` for the focused node view
+- Clickable nodes on the map
+- Right-side node details only in the node view
+- 20-node mock network with connected channels
+- Map ambient bed with distributed node-trigger pulses and ripples
+- Selected-node local resonance behavior
+- Minimal black-and-white UI with sound toggle and density control
+
+## Project Structure
 
 ```text
 apps/
   api/        Backend placeholder for ingest and live streaming
-  web/        React app shell and scene placeholders
+  web/        UI, scenes, state, canvas renderer, and audio engine
 packages/
-  contracts/  Shared types for nodes, channels, bootstrap data, and events
+  contracts/  Shared types for nodes, channels, events, and audio metadata
 ```
 
-## Setup
+## Run Locally
 
 ```bash
 npm install
 npm run dev
+npm run build
 ```
 
 The default `dev` script starts the web app workspace.
 
-## Current scaffold
+## Architecture Notes
 
-- Base app shell
-- Scene routing with URL hash sync
-- World map placeholder
-- Node resonance placeholder
-- Mock nodes, channels, and events
-- Simulation placeholder
-- Audio engine placeholder
-- Shared contracts package
+- Data is still mock-driven
+- Rendering is still canvas-based, not Pixi yet
+- Live Fiber ingestion is not implemented yet
+- The sonic system is fixed to a D pentatonic, guqin-inspired design
 
-## Architecture notes
+## Next Steps
 
-- Keep simulation, rendering, interaction, and audio separate.
-- The current world map and node resonance scenes are placeholders only.
-- The visual layer is intentionally DOM-based for now.
-- TODO: replace placeholder scene content with Pixi-powered rendering.
-- TODO: replace mock activity loop with real backend bootstrap + live stream data.
-- TODO: connect audio triggers to actual simulation events.
+- Replace the canvas renderer with Pixi scenes
+- Connect to real Fiber-backed data
+- Continue tuning sound density, resonance timing, and scene feel
 

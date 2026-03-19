@@ -1,10 +1,10 @@
 :root {
   color-scheme: dark;
-  font-family: "SF Mono", "IBM Plex Sans", sans-serif;
+  font-family: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   line-height: 1.5;
   font-weight: 400;
-  background: #02060d;
-  color: #ebf2ff;
+  background: #000;
+  color: #fff;
 }
 
 * {
@@ -18,8 +18,24 @@ body,
   min-height: 100%;
 }
 
+main {
+  min-height: 100vh;
+}
+
+.render-surface {
+  position: absolute;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  z-index: 1;
+}
+
 body {
   min-width: 320px;
+  overflow: hidden;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
 }
 
 button {
@@ -29,4 +45,3 @@ button {
 a {
   color: inherit;
 }
-

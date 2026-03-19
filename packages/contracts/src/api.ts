@@ -1,4 +1,4 @@
-import type { EchoChannel, EchoNode } from "./models";
+import type { AudioSettings, EchoChannel, EchoNode, SceneId } from "./models";
 import type { EchoEvent } from "./events";
 
 export type SceneBootstrap = {
@@ -15,7 +15,8 @@ export type NetworkSimulation = {
 export type AudioEngine = {
   enable: () => void;
   disable: () => void;
+  configure: (settings: AudioSettings) => void;
+  syncAmbient: (scene: SceneId, nodes: EchoNode[]) => void;
   trigger: (event: EchoEvent) => void;
   dispose: () => void;
 };
-

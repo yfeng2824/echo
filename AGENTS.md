@@ -1,8 +1,7 @@
 # AGENTS.md
 
 - Project: Echo
-- Purpose: visual + sonic demo for the Fiber network liveness
-- Goal: make network liveness perceptible through motion and sound
+- Purpose: visual + sonic demo for Fiber network liveness
 - Treat this as a demo, not a production dashboard
 
 ## Priorities
@@ -15,19 +14,11 @@
 - Keep simulation separate from rendering
 - Keep interaction separate from rendering
 - Keep audio separate from rendering
-- Share types through a small contracts layer
-- Add abstractions only when used by more than one scene or subsystem
+- Keep shared types in `packages/contracts`
 
-## Product boundaries
-- Build only the world map view and node resonance view for V1
-- Do not add tables, admin tools, auth, or generic dashboard UI
-- Do not add full map product features unless explicitly requested
-
-## Implementation rules
+## Implementation Rules
 - Preserve desktop-first demo quality
-- Use real data through a thin adapter layer when needed
-- Keep mock data paths available during development
+- Keep a mock-data path during development
 - Make audio opt-in
-- Keep visuals stylized and minimal
-- Optimize changes for scene feel, timing, and responsiveness
-
+- Keep visuals minimal and black/white
+- Preserve the fixed guqin-inspired pentatonic sonic system unless explicitly changed

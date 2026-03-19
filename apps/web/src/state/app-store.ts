@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type {
   AudioEngine,
+  AudioSettings,
   EchoChannel,
   EchoEvent,
   EchoNode,
@@ -19,6 +20,7 @@ type AppState = {
   activeScene: SceneId;
   selectedNodeId: string | null;
   audioEnabled: boolean;
+  audioSettings: AudioSettings;
   nodes: EchoNode[];
   channels: EchoChannel[];
   recentEvents: EchoEvent[];
@@ -29,13 +31,20 @@ type AppState = {
   setScene: (scene: SceneId) => void;
   selectNode: (nodeId: string) => void;
   goToMap: () => void;
+  setAudioSettings: (nextSettings: Partial<AudioSettings>) => void;
   toggleAudio: () => void;
+};
+
+const defaultAudioSettings: AudioSettings = {
+  density: "sparse",
+  timbrePreset: "guqin"
 };
 
 export const useAppStore = create<AppState>((set, get) => ({
   activeScene: "map",
   selectedNodeId: null,
   audioEnabled: false,
+  audioSettings: defaultAudioSettings,
   nodes: [],
   channels: [],
   recentEvents: [],
@@ -52,7 +61,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   appendEvent: (event) => {
     set((state) => ({
-      recentEvents: [event, ...state.recentEvents].slice(0, 8)
+      recentEvents: [event, ...state.recentEvents].slice(0, 24)
     }));
   },
   setScene: (scene) => {
@@ -64,11 +73,21 @@ export const useAppStore = create<AppState>((set, get) => ({
   goToMap: () => {
     set({ activeScene: "map" });
   },
+  setAudioSettings: (nextSettings) => {
+    set((state) => ({
+      audioSettings: {
+        ...state.audioSettings,
+        ...nextSettings
+      }
+    }));
+  },
   toggleAudio: () => {
     const nextEnabled = !get().audioEnabled;
     const audio = get().audio;
+    const audioSettings = get().audioSettings;
 
     if (nextEnabled) {
+      audio?.configure(audioSettings);
       audio?.enable();
     } else {
       audio?.disable();
