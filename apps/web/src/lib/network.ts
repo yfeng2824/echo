@@ -1,5 +1,10 @@
 import type { EchoNode, RegisterBand } from "@echo/contracts";
-import { getDisplayNodeId, getFullHexNodeId } from "./node-id";
+import {
+  getDisplayNodeId,
+  getFullHexNodeId,
+  getFullNodeId,
+  normalizePublicNodeId
+} from "./node-id";
 
 export function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBand> {
   const liveNodes = nodes
@@ -24,23 +29,32 @@ export function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBan
   return bandMap;
 }
 
+function getNodeSearchTerms(node: EchoNode) {
+  const rawId = node.id.toLowerCase();
+  const peerId = node.peerId?.toLowerCase() ?? "";
+  const fiberPubkey = node.fiberPubkey?.toLowerCase() ?? "";
+  const fullNodeId = getFullNodeId(node).toLowerCase();
+  const fallbackHexId = getFullHexNodeId(node.id).toLowerCase();
+  const displayId = getDisplayNodeId(node).toLowerCase();
+  const normalizedPublicIds = [
+    fiberPubkey ? normalizePublicNodeId(fiberPubkey) : "",
+    normalizePublicNodeId(fullNodeId)
+  ];
+
+  return new Set([rawId, peerId, fiberPubkey, fullNodeId, fallbackHexId, displayId, ...normalizedPublicIds]);
+}
+
 export function findNodeByQuery(nodes: EchoNode[], query: string) {
   const normalizedQuery = query.trim().toLowerCase();
   if (!normalizedQuery) {
     return null;
   }
 
+  const normalizedPublicQuery = normalizePublicNodeId(normalizedQuery);
   return (
     nodes.find((node) => {
-      const rawId = node.id.toLowerCase();
-      const fullHexId = getFullHexNodeId(node.id).toLowerCase();
-      const displayId = getDisplayNodeId(node.id).toLowerCase();
-
-      return (
-        rawId === normalizedQuery ||
-        fullHexId === normalizedQuery ||
-        displayId === normalizedQuery
-      );
+      const searchTerms = getNodeSearchTerms(node);
+      return searchTerms.has(normalizedQuery) || searchTerms.has(normalizedPublicQuery);
     }) ?? null
   );
 }

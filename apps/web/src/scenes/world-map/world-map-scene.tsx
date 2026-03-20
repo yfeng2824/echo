@@ -5,9 +5,16 @@ import "../../scenes/scenes.css";
 
 type SearchState = "idle" | "loading" | "empty";
 type EmptyOverlayState = "idle" | "visible" | "closing";
+type OverlayContent = {
+  title: string;
+  description: string;
+  buttonLabel: string;
+  buttonAction: () => void;
+};
 
 export function WorldMapScene() {
   const nodes = useAppStore((state) => state.nodes);
+  const networkStatus = useAppStore((state) => state.networkStatus);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const selectNode = useAppStore((state) => state.selectNode);
   const startMapSearchTransition = useAppStore((state) => state.startMapSearchTransition);
@@ -19,6 +26,7 @@ export function WorldMapScene() {
   const dismissTimeoutRef = useRef<number | null>(null);
   const foundTransitionTimeoutRef = useRef<number | null>(null);
   const isSearchLocked = mapSearchTransition !== null;
+  const isLiveDataUnavailable = networkStatus === "unavailable";
 
   const cancelSearchTimers = () => {
     if (loadingTimeoutRef.current) {
@@ -107,6 +115,22 @@ export function WorldMapScene() {
     }, 760);
   };
 
+  const overlayContent: OverlayContent | null = isLiveDataUnavailable
+    ? {
+        title: "No live echo detected",
+        description: "Live network activity is not available right now.",
+        buttonLabel: "Retry",
+        buttonAction: () => window.location.reload()
+      }
+    : searchState === "empty"
+      ? {
+          title: "No echo found",
+          description: "We couldn't find a matching node in the current network.",
+          buttonLabel: "Back to map",
+          buttonAction: handleDismissEmptyState
+        }
+      : null;
+
   return (
     <section className="scene scene--full">
       <div className="scene__overlay scene__overlay--top-right">
@@ -118,7 +142,7 @@ export function WorldMapScene() {
             aria-label="Search nodes"
             onChange={handleChange}
             autoComplete="off"
-            disabled={isSearchLocked}
+            disabled={isSearchLocked || isLiveDataUnavailable}
           />
           <span
             className={`scene__search-loader ${
@@ -129,10 +153,10 @@ export function WorldMapScene() {
         </form>
       </div>
 
-      {searchState === "empty" ? (
+      {overlayContent ? (
         <div
           className={`scene__empty-overlay ${
-            emptyOverlayState === "closing" ? "scene__empty-overlay--closing" : ""
+            !isLiveDataUnavailable && emptyOverlayState === "closing" ? "scene__empty-overlay--closing" : ""
           }`}
           role="dialog"
           aria-modal="true"
@@ -140,7 +164,7 @@ export function WorldMapScene() {
         >
           <div
             className={`scene__empty-state ${
-              emptyOverlayState === "closing" ? "scene__empty-state--closing" : ""
+              !isLiveDataUnavailable && emptyOverlayState === "closing" ? "scene__empty-state--closing" : ""
             }`}
           >
             <div className="scene__empty-mark" aria-hidden="true">
@@ -149,16 +173,14 @@ export function WorldMapScene() {
               <span className="scene__empty-mark-ring scene__empty-mark-ring--mid" />
               <span className="scene__empty-mark-ring scene__empty-mark-ring--outer" />
             </div>
-            <h2 className="scene__empty-title">No echo found</h2>
-            <p className="scene__empty-description">
-              We couldn&apos;t find a matching node in the current network.
-            </p>
+            <h2 className="scene__empty-title">{overlayContent.title}</h2>
+            <p className="scene__empty-description">{overlayContent.description}</p>
             <button
               className="chrome-button scene__empty-dismiss"
               type="button"
-              onClick={handleDismissEmptyState}
+              onClick={overlayContent.buttonAction}
             >
-              Back to map
+              {overlayContent.buttonLabel}
             </button>
           </div>
         </div>

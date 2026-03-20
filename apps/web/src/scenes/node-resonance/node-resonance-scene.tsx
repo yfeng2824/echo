@@ -1,4 +1,3 @@
-import { useMemo } from "react";
 import { useAppStore } from "../../state/app-store";
 import "../../scenes/scenes.css";
 import { NodeInfoCard } from "../../ui/node-info-card";
@@ -10,10 +9,11 @@ export function NodeResonanceScene() {
   const recentEvents = useAppStore((state) => state.recentEvents);
   const goToMap = useAppStore((state) => state.goToMap);
 
-  const selectedNode = useMemo(
-    () => nodes.find((node) => node.id === selectedNodeId) ?? nodes[0],
-    [nodes, selectedNodeId]
-  );
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
+  const recentEventNode =
+    recentEvents.length > 0
+      ? nodes.find((node) => node.id === recentEvents[0].nodeId) ?? null
+      : null;
 
   return (
     <section className="scene scene--full">
@@ -30,7 +30,9 @@ export function NodeResonanceScene() {
       <div className="scene__hint scene__hint--dim">
         {recentEvents.length === 0
           ? "Waiting for resonance events"
-          : `Recent event: ${recentEvents[0].type} · ${getDisplayNodeId(recentEvents[0].nodeId)}`}
+          : `Recent event: ${recentEvents[0].type} · ${getDisplayNodeId(
+              recentEventNode ?? recentEvents[0].nodeId
+            )}`}
       </div>
     </section>
   );

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { EchoNode } from "@echo/contracts";
-import { getDisplayNodeId, getFullHexNodeId } from "../lib/node-id";
+import { getDisplayNodeId, getFullNodeId } from "../lib/node-id";
 
 type NodeInfoCardProps = {
   node: EchoNode | null;
@@ -24,8 +24,8 @@ export function NodeInfoCard({ node, visible }: NodeInfoCardProps) {
   }
 
   const statusLabel = node.status === "live" ? "Live" : "Quiet";
-  const fullNodeId = getFullHexNodeId(node.id);
-  const displayNodeId = getDisplayNodeId(node.id);
+  const fullNodeId = getFullNodeId(node);
+  const displayNodeId = getDisplayNodeId(node);
 
   const handleCopy = async () => {
     try {
@@ -39,7 +39,7 @@ export function NodeInfoCard({ node, visible }: NodeInfoCardProps) {
         setCopyState("idle");
       }, 1200);
     } catch {
-      // TODO: add non-blocking copy feedback if clipboard access fails.
+      // Ignore clipboard failures so the card does not flash an extra error state.
     }
   };
 
