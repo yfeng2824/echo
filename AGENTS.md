@@ -15,6 +15,8 @@
 - Keep interaction separate from rendering
 - Keep audio separate from rendering
 - Keep shared types in `packages/contracts`
+- Pixi owns the visual rendering layer
+- Keep UI overlays and controls outside the renderer
 - World-map rendering should use a restrained atmospheric projection treatment, not a dashboard-style or political-map presentation
 - Avoid cut-style transitions
 - Shared logic should live in reusable helpers under `apps/web/src/lib`

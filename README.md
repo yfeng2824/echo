@@ -7,8 +7,7 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 - React + TypeScript + Vite
 - Zustand
 - Shared contracts package in `packages/contracts`
-- Current rendering: custom canvas renderer with a `d3-geo` world-map foundation
-- Planned rendering upgrade: PixiJS
+- Current rendering: Pixi-based renderer with a `d3-geo` world-map foundation
 - Current audio: custom Web Audio guqin-inspired system
 - Planned backend: thin adapter over Fiber/dashboard or explorer APIs
 
@@ -37,8 +36,9 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 ```text
 apps/
   api/        Backend placeholder for ingest and live streaming
-  web/        UI, scenes, state, canvas renderer, and audio engine
+  web/        UI, scenes, state, Pixi renderer, and audio engine
     src/lib/  Shared helpers for node IDs, queries, map projection, and reusable client logic
+    src/ui/pixi/  Pixi scene and transition rendering
 packages/
   contracts/  Shared types for nodes, channels, events, and audio metadata
 ```
@@ -56,7 +56,7 @@ The default `dev` script starts the web app workspace.
 ## Architecture Notes
 
 - Data is still mock-driven
-- Rendering is still canvas-based, with a projection-based `d3-geo` world map
+- Rendering uses Pixi, with `d3-geo` providing the projection-based world map
 - Live Fiber ingestion is not implemented yet
 - The sonic system is fixed to a D pentatonic, guqin-inspired design
 - Search is wired to direct node lookup and an empty-state overlay for unmatched IDs
@@ -65,6 +65,6 @@ The default `dev` script starts the web app workspace.
 
 ## Next Steps
 
-- Replace the canvas renderer with Pixi scenes
+- Stabilize and refine the Pixi renderer
 - Connect to real Fiber-backed data
 - Continue tuning sound density, resonance timing, and scene feel
