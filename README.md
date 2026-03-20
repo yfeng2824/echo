@@ -7,7 +7,7 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 - React + TypeScript + Vite
 - Zustand
 - Shared contracts package in `packages/contracts`
-- Current rendering: custom canvas renderer
+- Current rendering: custom canvas renderer with a `d3-geo` world-map foundation
 - Planned rendering upgrade: PixiJS
 - Current audio: custom Web Audio guqin-inspired system
 - Planned backend: thin adapter over Fiber/dashboard or explorer APIs
@@ -19,6 +19,7 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 - Clickable nodes on the map
 - Search by node ID
 - Empty state overlay for unmatched search
+- Atmospheric projected world map with a restrained black-and-white treatment
 - Node-to-local-view transition carries the selected node into the focused scene
 - Minimal map overlay with a search field only
 - Right-side node details only in the node view
@@ -37,7 +38,7 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 apps/
   api/        Backend placeholder for ingest and live streaming
   web/        UI, scenes, state, canvas renderer, and audio engine
-    src/lib/  Shared helpers for node IDs, queries, and reusable client logic
+    src/lib/  Shared helpers for node IDs, queries, map projection, and reusable client logic
 packages/
   contracts/  Shared types for nodes, channels, events, and audio metadata
 ```
@@ -55,10 +56,10 @@ The default `dev` script starts the web app workspace.
 ## Architecture Notes
 
 - Data is still mock-driven
-- Rendering is still canvas-based, not Pixi yet
+- Rendering is still canvas-based, with a projection-based `d3-geo` world map
 - Live Fiber ingestion is not implemented yet
 - The sonic system is fixed to a D pentatonic, guqin-inspired design
-- The map search field is present, but does not currently open a visible result list
+- Search is wired to direct node lookup and an empty-state overlay for unmatched IDs
 - The node scene reseeds peer layout on entry so repeated visits feel different
 - Collision-generated echo rings are capped to prevent noisy feedback loops
 

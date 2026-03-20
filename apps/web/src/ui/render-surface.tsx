@@ -2,36 +2,7 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "../state/app-store";
 import type { EchoEvent } from "@echo/contracts";
 import { getDisplayNodeId } from "../lib/node-id";
-
-const WORLD_ASCII = [
-  "                                                                                ",
-  "          #######                                                               ",
-  "        ###########                  ########     ##################            ",
-  "       ##############              ###################################          ",
-  "      #################           #####################################         ",
-  "      ###################        #######################################        ",
-  "       ##################        #######################################  ##    ",
-  "        ##################      ############################################    ",
-  "         #################      ############################################    ",
-  "           #############         ##########################################     ",
-  "            ###########          ########################################       ",
-  "             #########            #####################################         ",
-  "              #######             ###################################           ",
-  "               #####               #################################            ",
-  "                ###                 ##############################       ##     ",
-  "                ##                   ###########################       ######   ",
-  "                                      #######################         ########  ",
-  "                  ###                  ####################           ########  ",
-  "                 #####                 ###################             ######   ",
-  "                 ######                 ################                ####    ",
-  "                 ######                  ##############                         ",
-  "                 #####                    ###########                           ",
-  "                 ####                      #########                            ",
-  "                  ##                        #######                             ",
-  "                                             #####                              ",
-  "                                              ###                               ",
-  "                                                                                "
-];
+import { createWorldMapProjection } from "../lib/map-projection";
 
 function getVisualProfile(event: EchoEvent, scene: "map" | "node") {
   const baseIntensity = Math.max(0.08, Math.min(1, event.intensity));
@@ -124,6 +95,9 @@ export function RenderSurface() {
     let animationFrame = 0;
     let hoveredNodeId: string | null = null;
     let dpr = 1;
+    let viewportWidth = window.innerWidth;
+    let viewportHeight = window.innerHeight;
+    let worldMapProjection = createWorldMapProjection(viewportWidth, viewportHeight);
     const collisionHistory = new Map<string, number>();
     const collisionAudioHistory = new Map<string, number>();
     let collisionBursts: Array<{
@@ -136,57 +110,28 @@ export function RenderSurface() {
     }> = [];
 
     const resize = () => {
+      viewportWidth = window.innerWidth;
+      viewportHeight = window.innerHeight;
       dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
-      canvas.width = Math.floor(window.innerWidth * dpr);
-      canvas.height = Math.floor(window.innerHeight * dpr);
-      canvas.style.width = `${window.innerWidth}px`;
-      canvas.style.height = `${window.innerHeight}px`;
+      canvas.width = Math.floor(viewportWidth * dpr);
+      canvas.height = Math.floor(viewportHeight * dpr);
+      canvas.style.width = `${viewportWidth}px`;
+      canvas.style.height = `${viewportHeight}px`;
       context.setTransform(dpr, 0, 0, dpr, 0, 0);
       context.imageSmoothingEnabled = false;
-    };
-
-    const getMapLayout = () => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
-      const mapWidth = Math.min(width * 0.8, 1100);
-      const mapHeight = mapWidth * (27 / 80);
-      const offsetX = width / 2 - mapWidth / 2;
-      const offsetY = height / 2 - mapHeight / 2 + 20;
-
-      return { width, height, mapWidth, mapHeight, offsetX, offsetY };
+      worldMapProjection = createWorldMapProjection(viewportWidth, viewportHeight);
     };
 
     const getMapPosition = (lat: number, lng: number) => {
-      const { mapWidth, mapHeight, offsetX, offsetY } = getMapLayout();
+      const point = worldMapProjection.project(lng, lat);
+      if (!point) {
+        return { x: viewportWidth / 2, y: viewportHeight / 2 };
+      }
 
       return {
-        x: offsetX + ((lng + 180) / 360) * mapWidth,
-        y: offsetY + ((90 - lat) / 180) * mapHeight
+        x: point.x,
+        y: point.y
       };
-    };
-
-    const drawWorldMapDots = (alpha: number) => {
-      if (alpha <= 0.01) {
-        return;
-      }
-
-      const { mapWidth, mapHeight, offsetX, offsetY } = getMapLayout();
-
-      context.fillStyle = `rgba(255, 255, 255, ${0.16 * alpha})`;
-      context.beginPath();
-      for (let y = 0; y < WORLD_ASCII.length; y += 1) {
-        const row = WORLD_ASCII[y];
-        for (let x = 0; x < row.length; x += 1) {
-          if (row[x] !== "#") {
-            continue;
-          }
-
-          const px = Math.round(offsetX + (x / 79) * mapWidth);
-          const py = Math.round(offsetY + (y / 26) * mapHeight);
-          context.rect(px, py, 2, 2);
-        }
-      }
-      context.fill();
     };
 
     const hashString = (value: string) => {
@@ -220,7 +165,8 @@ export function RenderSurface() {
     };
 
     const drawMap = (time: number) => {
-      const { width, height } = getMapLayout();
+      const width = viewportWidth;
+      const height = viewportHeight;
       const now = Date.now();
       const transitionNode = mapSearchTransition
         ? nodes.find((node) => node.id === mapSearchTransition.nodeId) ?? null
@@ -246,7 +192,7 @@ export function RenderSurface() {
       context.translate(width / 2, height / 2);
       context.scale(1 + easedFocus * 0.14, 1 + easedFocus * 0.14);
       context.translate(-width / 2, -height / 2);
-      drawWorldMapDots(1);
+      worldMapProjection.draw(context, 1);
 
       nodes.forEach((node, index) => {
         const rawPosition = getMapPosition(node.lat, node.lng);
@@ -353,8 +299,8 @@ export function RenderSurface() {
     };
 
     const drawLocal = (time: number) => {
-      const width = window.innerWidth;
-      const height = window.innerHeight;
+      const width = viewportWidth;
+      const height = viewportHeight;
       const centerX = Math.round(width / 2);
       const centerY = Math.round(height / 2);
       const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
@@ -371,7 +317,7 @@ export function RenderSurface() {
 
       context.fillStyle = "#000";
       context.fillRect(0, 0, width, height);
-      drawWorldMapDots(mapFade);
+      worldMapProjection.draw(context, mapFade);
 
       if (!selectedNode) {
         return;
