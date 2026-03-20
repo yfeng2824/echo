@@ -1,0 +1,216 @@
+.network-transition {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  pointer-events: none;
+}
+
+.network-transition__layer {
+  position: absolute;
+  inset: 0;
+}
+
+.network-transition__veil {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(2px);
+}
+
+.network-transition__state {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+  width: min(360px, calc(100vw - 48px));
+  transform: translate(-50%, -50%);
+  text-align: center;
+  color: #fff;
+}
+
+.network-transition__indicator {
+  position: relative;
+  width: 56px;
+  height: 28px;
+}
+
+.network-transition__indicator-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+}
+
+.network-transition__indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 0 18px rgba(255, 255, 255, 0.12);
+}
+
+.network-transition__indicator-dot--left {
+  margin-left: -18px;
+}
+
+.network-transition__indicator-dot--right {
+  margin-left: 18px;
+}
+
+.network-transition__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+.network-transition__eyebrow {
+  margin: 0;
+  font-size: 10px;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  opacity: 0.58;
+}
+
+.network-transition__label {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 400;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  line-height: 1.5;
+}
+
+.network-transition__layer--loading .network-transition__veil {
+  animation: network-transition-veil-enter 0.72s ease forwards;
+}
+
+.network-transition__layer--loading .network-transition__state {
+  animation: network-transition-state-enter 0.32s ease forwards;
+}
+
+.network-transition__layer--loading .network-transition__indicator-dot--left {
+  animation: network-transition-switch-left 1.8s ease-in-out infinite;
+}
+
+.network-transition__layer--loading .network-transition__indicator-dot--right {
+  animation: network-transition-switch-right 1.8s ease-in-out infinite;
+}
+
+.network-transition__layer--settling .network-transition__veil {
+  animation: network-transition-veil-exit 2.5s ease forwards;
+}
+
+.network-transition__layer--settling .network-transition__state {
+  animation: network-transition-state-exit 2.5s ease forwards;
+}
+
+.network-transition__layer--settling .network-transition__indicator-dot--left {
+  animation: network-transition-switch-left 1.8s ease-in-out infinite;
+}
+
+.network-transition__layer--settling .network-transition__indicator-dot--right {
+  animation: network-transition-switch-right 1.8s ease-in-out infinite;
+}
+
+@keyframes network-transition-veil-enter {
+  from {
+    opacity: 0;
+  }
+
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes network-transition-state-enter {
+  from {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% + 10px));
+  }
+
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+}
+
+@keyframes network-transition-veil-exit {
+  0% {
+    opacity: 1;
+  }
+
+  70% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes network-transition-state-exit {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translate(-50%, -50%);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 8px));
+  }
+}
+
+@keyframes network-transition-switch-left {
+  0% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) translateX(-18px) scale(0.8);
+  }
+
+  50% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(18px) scale(1);
+  }
+
+  100% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) translateX(-18px) scale(0.8);
+  }
+}
+
+@keyframes network-transition-switch-right {
+  0% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(18px) scale(1);
+  }
+
+  50% {
+    opacity: 0.3;
+    transform: translate(-50%, -50%) translateX(-18px) scale(0.8);
+  }
+
+  100% {
+    opacity: 1;
+    transform: translate(-50%, -50%) translateX(18px) scale(1);
+  }
+}
+
+@media (max-width: 900px) {
+  .network-transition__eyebrow {
+    font-size: 9px;
+    letter-spacing: 0.28em;
+  }
+
+  .network-transition__label {
+    font-size: 11px;
+    letter-spacing: 0.14em;
+  }
+}

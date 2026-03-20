@@ -110,6 +110,15 @@
   opacity: 0.5;
 }
 
+.audio-controls__hint {
+  max-width: 140px;
+  font-size: 9px;
+  line-height: 1.4;
+  letter-spacing: 0.08em;
+  opacity: 0.45;
+  text-transform: uppercase;
+}
+
 .audio-controls select {
   border: none;
   border-bottom: 1px solid rgba(255, 255, 255, 0.1);

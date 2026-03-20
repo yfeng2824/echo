@@ -4,30 +4,28 @@
 - Purpose: visual + sonic demo for Fiber network liveness
 - Treat this as a demo, not a production dashboard
 
-## Priorities
-- Prefer clarity over feature count
-- Prefer atmosphere over analytics detail
-- Prefer fast iteration over infrastructure depth
-- Avoid unnecessary complexity
+## Build Rules
+- Add Fastify adapters in `apps/api`.
+- Keep shared types in `packages/contracts`.
+- Put reusable frontend helpers in `apps/web/src/lib`.
+- Route frontend data access through the app API layer, not upstream services directly.
+- Keep simulation, rendering, interaction, and audio in separate modules.
+- Keep Pixi as the rendering layer; keep controls and overlays outside Pixi.
 
-## Architecture
-- Keep simulation separate from rendering
-- Keep interaction separate from rendering
-- Keep audio separate from rendering
-- Keep shared types in `packages/contracts`
-- Pixi owns the visual rendering layer
-- Keep UI overlays and controls outside the renderer
-- World-map rendering should use a restrained atmospheric projection treatment, not a dashboard-style or political-map presentation
-- Avoid cut-style transitions
-- Shared logic should live in reusable helpers under `apps/web/src/lib`
-- Visible node IDs use a derived truncated hexadecimal display format; internal graph IDs must stay unchanged
-- Collision echoes in the node scene must remain capped with the `rippleLayer` recursion limit
+## UX Rules
+- Optimize for atmosphere and legibility, not dense analytics.
+- Keep the visual language minimal and black/white.
+- Keep the map treatment atmospheric; avoid dashboard or political-map styling.
+- Keep transitions continuous; avoid cut-style scene changes.
+- Keep interactions lightweight; prefer overlays over layout-shifting feedback.
+- Preserve desktop-first quality.
 
-## Implementation Rules
-- Preserve desktop-first demo quality
-- Keep a mock-data path during development
-- Make audio opt-in
-- Keep visuals minimal and black/white
-- Feedback interactions should stay minimal and use overlays rather than layout-shifting text
-- Comments should stay short and only explain non-obvious timing, sonic, or collision behavior
-- Preserve the fixed guqin-inspired pentatonic sonic system unless explicitly changed
+## Data And Audio Rules
+- Use derived truncated hex IDs for visible node labels; do not change internal graph IDs.
+- Keep collision echoes capped with the `rippleLayer` recursion limit.
+- Keep audio opt-in.
+- Preserve the guqin-inspired pentatonic system unless the task explicitly changes it.
+
+## Code Style
+- Remove unnecessary complexity before adding new structure.
+- Add comments only for non-obvious timing, sonic, or collision behavior.

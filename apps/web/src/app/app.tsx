@@ -1,13 +1,38 @@
-import { useEffect } from "react";
-import { AppShell } from "./app-shell";
+import { useEffect, useRef, useState } from "react";
+import type {
+  AudioDensity,
+  BatchRole,
+  DegreeHint,
+  EchoEvent,
+  EchoNode,
+  HeadlineCounts,
+  NetworkSimulation,
+  RegisterBand,
+  SceneBootstrap
+} from "@echo/contracts";
+import { createAudioEngine } from "../engine/audio/audio-engine";
+import { createApiNetworkSimulation, fetchSceneBootstrap } from "../lib/api-client";
+import { buildRegisterBandMap } from "../lib/network";
 import { useSceneRouting } from "../scenes/use-scene-routing";
 import { useAppStore } from "../state/app-store";
-import { createAudioEngine } from "../engine/audio/audio-engine";
-import { createNetworkSimulation } from "../engine/simulation/network-simulation";
-import { mockChannels, mockNodes } from "../data/mock/network";
-import { mockEvents } from "../data/mock/events";
-import { buildRegisterBandMap } from "../lib/network";
-import type { BatchRole, DegreeHint, EchoEvent } from "@echo/contracts";
+import type { NetworkStatus } from "../state/app-store";
+import { AppShell } from "./app-shell";
+
+type AppStoreState = ReturnType<typeof useAppStore.getState>;
+
+type DelayRange = {
+  min: number;
+  max: number;
+};
+
+type BootstrapLoadResult = {
+  bootstrap: SceneBootstrap;
+  simulation: NetworkSimulation;
+  status: {
+    state: NetworkStatus;
+    error?: string | null;
+  };
+};
 
 const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
   1: ["gong"],
@@ -17,6 +42,36 @@ const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
 };
 
 const RESONANCE_PEER_DEGREES: DegreeHint[] = ["shang", "jue", "yu", "zhi"];
+const NETWORK_TRANSIENT_SETTLE_MS = 1800;
+
+const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
+  sparse: { min: 900, max: 1500 },
+  balanced: { min: 700, max: 1200 },
+  rich: { min: 450, max: 900 }
+};
+
+const RESONANCE_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
+  sparse: { min: 2100, max: 3100 },
+  balanced: { min: 1750, max: 2600 },
+  rich: { min: 1400, max: 2100 }
+};
+
+const EMPTY_HEADLINE_COUNTS: HeadlineCounts = {
+  activeNodeCount: 0,
+  channelCount: 0
+};
+
+const EMPTY_BOOTSTRAP: SceneBootstrap = {
+  nodes: [],
+  channels: [],
+  recentEvents: [],
+  headlineCounts: EMPTY_HEADLINE_COUNTS
+};
+
+const SILENT_SIMULATION: NetworkSimulation = {
+  start() {},
+  stop() {}
+};
 
 function getBatchRole(index: number, voiceCount: number): BatchRole {
   if (index === 0) {
@@ -30,76 +85,249 @@ function getBatchRole(index: number, voiceCount: number): BatchRole {
   return "support";
 }
 
+function pickDelay(range: DelayRange) {
+  return range.min + Math.random() * (range.max - range.min);
+}
+
+function shuffleNodes(nodes: EchoNode[]) {
+  return [...nodes].sort(() => Math.random() - 0.5);
+}
+
+function chooseAmbientBatchSize(density: AudioDensity) {
+  const roll = Math.random();
+
+  if (density === "rich") {
+    return roll < 0.2 ? 1 : roll < 0.6 ? 2 : 3;
+  }
+
+  if (density === "balanced") {
+    return roll < 0.35 ? 1 : roll < 0.8 ? 2 : 3;
+  }
+
+  return roll < 0.65 ? 1 : roll < 0.92 ? 2 : 3;
+}
+
+async function loadBootstrap(currentNetwork: AppStoreState["currentNetwork"]): Promise<BootstrapLoadResult> {
+  try {
+    const bootstrap = await fetchSceneBootstrap(currentNetwork);
+
+    return {
+      bootstrap,
+      simulation: createApiNetworkSimulation(currentNetwork, bootstrap.recentEvents),
+      status: { state: "ready" }
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Network bootstrap failed";
+
+    return {
+      bootstrap: EMPTY_BOOTSTRAP,
+      simulation: SILENT_SIMULATION,
+      status: { state: "unavailable", error: message }
+    };
+  }
+}
+
+function getSelectedNode(state: Pick<AppStoreState, "nodes" | "selectedNodeId">) {
+  return state.nodes.find((node) => node.id === state.selectedNodeId) ?? null;
+}
+
+function enrichIncomingEvent(
+  event: EchoEvent,
+  state: Pick<AppStoreState, "activeScene" | "mapSearchTransition" | "nodes" | "selectedNodeId">
+): EchoEvent {
+  const registerBandMap = buildRegisterBandMap(state.nodes);
+
+  return {
+    ...event,
+    at: event.at ?? new Date().toISOString(),
+    registerBand: event.registerBand ?? registerBandMap.get(event.nodeId) ?? 1,
+    source: event.source ?? "network",
+    batchRole: event.batchRole ?? "support"
+  };
+}
+
+function shouldTriggerEventAudio(
+  event: EchoEvent,
+  state: Pick<AppStoreState, "activeScene" | "mapSearchTransition" | "nodes" | "selectedNodeId">
+) {
+  if (state.activeScene === "map") {
+    return state.mapSearchTransition === null;
+  }
+
+  if (state.activeScene !== "node") {
+    return false;
+  }
+
+  const selectedNode = getSelectedNode(state);
+  return selectedNode ? event.nodeId === selectedNode.id || selectedNode.peers.includes(event.nodeId) : false;
+}
+
+function createAmbientEvent(
+  node: EchoNode,
+  index: number,
+  batchSize: number,
+  batchId: string,
+  timestamp: string,
+  registerBandMap: Map<string, RegisterBand>
+): EchoEvent {
+  return {
+    id: `${batchId}-${index}-${node.id}`,
+    type: "node_active",
+    at: timestamp,
+    nodeId: node.id,
+    intensity: Math.min(1, 0.35 + node.intensity * 0.65),
+    voiceIndex: index,
+    voiceCount: batchSize,
+    registerBand: registerBandMap.get(node.id) ?? 1,
+    degreeHint: AMBIENT_DEGREES[batchSize]?.[index],
+    batchId,
+    batchRole: getBatchRole(index, batchSize),
+    source: "ambient"
+  };
+}
+
+function createResonanceEvent(
+  node: EchoNode,
+  selectedNodeId: string,
+  index: number,
+  batchSize: number,
+  batchId: string,
+  timestamp: string,
+  registerBandMap: Map<string, RegisterBand>,
+  anchorDegree: DegreeHint
+): EchoEvent {
+  const isSelectedNode = node.id === selectedNodeId;
+
+  return {
+    id: `${batchId}-${index}-${node.id}`,
+    type: "node_active",
+    at: timestamp,
+    nodeId: node.id,
+    intensity: isSelectedNode
+      ? Math.min(1, 0.58 + node.intensity * 0.62)
+      : Math.min(0.86, 0.34 + node.intensity * 0.46),
+    voiceIndex: index,
+    voiceCount: batchSize,
+    registerBand: registerBandMap.get(node.id) ?? 1,
+    degreeHint: isSelectedNode
+      ? anchorDegree
+      : RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length],
+    batchId,
+    batchRole: getBatchRole(index, batchSize),
+    source: "resonance"
+  };
+}
+
 export function App() {
   useSceneRouting();
+  const audioRef = useRef<ReturnType<typeof createAudioEngine> | null>(null);
+  const previousNetworkRef = useRef<AppStoreState["currentNetwork"] | null>(null);
+  const previousTransitionVisibleRef = useRef(false);
+  const [ambientTransientHoldUntil, setAmbientTransientHoldUntil] = useState(0);
 
   const initialize = useAppStore((state) => state.initialize);
   const appendEvent = useAppStore((state) => state.appendEvent);
   const activeScene = useAppStore((state) => state.activeScene);
+  const currentNetwork = useAppStore((state) => state.currentNetwork);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const nodes = useAppStore((state) => state.nodes);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const audio = useAppStore((state) => state.audio);
   const audioEnabled = useAppStore((state) => state.audioEnabled);
   const audioSettings = useAppStore((state) => state.audioSettings);
+  const networkTransitionVisible = useAppStore((state) => state.networkTransitionVisible);
+  const setNetworkState = useAppStore((state) => state.setNetworkState);
   const isSearchFocusPhase = activeScene === "map" && mapSearchTransition !== null;
 
   useEffect(() => {
-    const simulation = createNetworkSimulation({
-      nodes: mockNodes,
-      channels: mockChannels,
-      events: mockEvents
-    });
-    const audio = createAudioEngine();
+    if (!audioRef.current) {
+      audioRef.current = createAudioEngine();
+    }
 
-    initialize({
-      simulation,
-      audio,
-      nodes: mockNodes,
-      channels: mockChannels
-    });
+    const audioEngine = audioRef.current;
+    let cancelled = false;
+    let simulation: NetworkSimulation | null = null;
 
-    simulation.start((event) => {
-      const currentState = useAppStore.getState();
-      const currentBandMap = buildRegisterBandMap(currentState.nodes);
-      const selectedNode = currentState.nodes.find((node) => node.id === currentState.selectedNodeId);
-      const isCurrentSearchFocusPhase =
-        currentState.activeScene === "map" && currentState.mapSearchTransition !== null;
-      const canPlayInNodeScene =
-        currentState.activeScene === "node" &&
-        selectedNode &&
-        (event.nodeId === selectedNode.id || selectedNode.peers.includes(event.nodeId));
-      const enrichedEvent = {
-        ...event,
-        at: new Date().toISOString(),
-        registerBand: currentBandMap.get(event.nodeId) ?? 1,
-        source: "network" as const,
-        batchRole: "support" as const
-      };
+    const handleEvent = (event: EchoEvent) => {
+      const state = useAppStore.getState();
+      const enrichedEvent = enrichIncomingEvent(event, state);
 
       appendEvent(enrichedEvent);
-      if ((!isCurrentSearchFocusPhase && currentState.activeScene === "map") || canPlayInNodeScene) {
-        audio.trigger(enrichedEvent);
+      if (shouldTriggerEventAudio(enrichedEvent, state)) {
+        audioEngine.trigger(enrichedEvent);
       }
-    });
+    };
+
+    const bootstrap = async () => {
+      setNetworkState("loading");
+      const result = await loadBootstrap(currentNetwork);
+
+      if (cancelled) {
+        result.simulation.stop();
+        return;
+      }
+
+      simulation = result.simulation;
+      setNetworkState(result.status.state, result.status.error ?? null);
+      initialize({
+        simulation: result.simulation,
+        audio: audioEngine,
+        ...result.bootstrap
+      });
+      result.simulation.start(handleEvent);
+    };
+
+    void bootstrap();
 
     return () => {
-      simulation.stop();
-      audio.dispose();
+      cancelled = true;
+      simulation?.stop();
     };
-  }, [appendEvent, initialize]);
+  }, [appendEvent, currentNetwork, initialize, setNetworkState]);
 
   useEffect(() => {
-    audio?.configure(audioSettings);
-  }, [audio, audioSettings]);
-
-  useEffect(() => {
-    if (!audioEnabled) {
+    if (!audio) {
       return;
     }
 
-    audio?.syncAmbient(isSearchFocusPhase ? "node" : activeScene, nodes);
-  }, [activeScene, audio, audioEnabled, audioSettings, isSearchFocusPhase, nodes]);
+    audio.configure(audioSettings);
+    if (!audioEnabled || networkTransitionVisible) {
+      audio.disable();
+      return;
+    }
+
+    audio.enable();
+    audio.syncAmbient(isSearchFocusPhase ? "node" : activeScene, nodes);
+  }, [activeScene, audio, audioEnabled, audioSettings, isSearchFocusPhase, networkTransitionVisible, nodes]);
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.dispose();
+      audioRef.current = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    const previousNetwork = previousNetworkRef.current;
+    previousNetworkRef.current = currentNetwork;
+
+    if (!previousNetwork || previousNetwork === currentNetwork || !audioEnabled || !audio) {
+      return;
+    }
+
+    audio.disable();
+  }, [audio, audioEnabled, currentNetwork]);
+
+  useEffect(() => {
+    const wasVisible = previousTransitionVisibleRef.current;
+    previousTransitionVisibleRef.current = networkTransitionVisible;
+
+    if (networkTransitionVisible || !wasVisible) {
+      return;
+    }
+
+    setAmbientTransientHoldUntil(Date.now() + NETWORK_TRANSIENT_SETTLE_MS);
+  }, [networkTransitionVisible]);
 
   useEffect(() => {
     if (!mapSearchTransition) {
@@ -135,47 +363,31 @@ export function App() {
       return;
     }
 
+    const holdRemaining = ambientTransientHoldUntil - Date.now();
+    if (holdRemaining > 0) {
+      const holdTimeoutId = window.setTimeout(() => {
+        setAmbientTransientHoldUntil(0);
+      }, holdRemaining);
+
+      return () => {
+        window.clearTimeout(holdTimeoutId);
+      };
+    }
+
     let timeoutId = 0;
-    let nodeQueue: typeof liveNodes = [];
+    let nodeQueue: EchoNode[] = [];
+    const delayRange = AMBIENT_DELAY_BY_DENSITY[audioSettings.density];
     const registerBandMap = buildRegisterBandMap(nodes);
 
-    const densityProfile =
-      audioSettings.density === "rich"
-        ? { minDelay: 450, maxDelay: 900 }
-        : audioSettings.density === "balanced"
-          ? { minDelay: 700, maxDelay: 1200 }
-          : { minDelay: 900, maxDelay: 1500 };
-
-    const chooseBatchSize = () => {
-      const roll = Math.random();
-
-      if (audioSettings.density === "rich") {
-        return roll < 0.2 ? 1 : roll < 0.6 ? 2 : 3;
-      }
-
-      if (audioSettings.density === "balanced") {
-        return roll < 0.35 ? 1 : roll < 0.8 ? 2 : 3;
-      }
-
-      return roll < 0.65 ? 1 : roll < 0.92 ? 2 : 3;
-    };
-
-    const refillQueue = () => {
-      nodeQueue = [...liveNodes].sort(() => Math.random() - 0.5);
-    };
-
     const scheduleBatch = () => {
-      const delay =
-        densityProfile.minDelay +
-        Math.random() * (densityProfile.maxDelay - densityProfile.minDelay);
       timeoutId = window.setTimeout(() => {
         const timestamp = new Date().toISOString();
-        const triggerCount = Math.min(liveNodes.length, chooseBatchSize());
-        const batchNodes = [];
+        const batchSize = Math.min(liveNodes.length, chooseAmbientBatchSize(audioSettings.density));
+        const batchNodes: EchoNode[] = [];
 
-        while (batchNodes.length < triggerCount) {
+        while (batchNodes.length < batchSize) {
           if (nodeQueue.length === 0) {
-            refillQueue();
+            nodeQueue = shuffleNodes(liveNodes);
           }
 
           const nextNode = nodeQueue.shift();
@@ -186,29 +398,15 @@ export function App() {
 
         const batchId = `ambient-${Date.now()}`;
 
-        // Keep the map view feeling distributed by letting a small batch speak together.
+        // Keep the map field distributed by letting a small batch speak together.
         batchNodes.forEach((node, index) => {
-          const event: EchoEvent = {
-            id: `${batchId}-${index}-${node.id}`,
-            type: "node_active",
-            at: timestamp,
-            nodeId: node.id,
-            intensity: Math.min(1, 0.35 + node.intensity * 0.65),
-            voiceIndex: index,
-            voiceCount: batchNodes.length,
-            registerBand: registerBandMap.get(node.id) ?? 1,
-            degreeHint: AMBIENT_DEGREES[batchNodes.length]?.[index],
-            batchId,
-            batchRole: getBatchRole(index, batchNodes.length),
-            source: "ambient"
-          };
-
+          const event = createAmbientEvent(node, index, batchNodes.length, batchId, timestamp, registerBandMap);
           appendEvent(event);
           audio.trigger(event);
         });
 
         scheduleBatch();
-      }, delay);
+      }, pickDelay(delayRange));
     };
 
     scheduleBatch();
@@ -216,7 +414,16 @@ export function App() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, isSearchFocusPhase, nodes]);
+  }, [
+    activeScene,
+    ambientTransientHoldUntil,
+    appendEvent,
+    audio,
+    audioEnabled,
+    audioSettings.density,
+    isSearchFocusPhase,
+    nodes
+  ]);
 
   useEffect(() => {
     if (!audioEnabled || activeScene !== "node" || !audio || !selectedNodeId) {
@@ -228,53 +435,36 @@ export function App() {
       return;
     }
 
-    const peerNodes = nodes.filter((node) => selectedNode.peers.includes(node.id));
-    const localNodes = [selectedNode, ...peerNodes];
+    const localNodes = [selectedNode, ...nodes.filter((node) => selectedNode.peers.includes(node.id))];
     const registerBandMap = buildRegisterBandMap(nodes);
+    const delayRange = RESONANCE_DELAY_BY_DENSITY[audioSettings.density];
     let timeoutId = 0;
 
     const schedulePhrase = () => {
-      const phraseDelay =
-        audioSettings.density === "rich"
-          ? 1400 + Math.random() * 700
-          : audioSettings.density === "balanced"
-            ? 1750 + Math.random() * 850
-            : 2100 + Math.random() * 1000;
-
       timeoutId = window.setTimeout(() => {
         const timestamp = new Date().toISOString();
         const batchId = `resonance-${Date.now()}`;
         const anchorDegree: DegreeHint = Math.random() > 0.55 ? "gong" : "zhi";
 
-        // Fire the local field as a single breath so audio and collision visuals stay aligned.
+        // Fire the local field as one breath so audio and collision visuals stay aligned.
         localNodes.forEach((node, index) => {
-          const event: EchoEvent = {
-            id: `${batchId}-${index}-${node.id}`,
-            type: "node_active",
-            at: timestamp,
-            nodeId: node.id,
-            intensity:
-              node.id === selectedNode.id
-                ? Math.min(1, 0.58 + node.intensity * 0.62)
-                : Math.min(0.86, 0.34 + node.intensity * 0.46),
-            voiceIndex: index,
-            voiceCount: localNodes.length,
-            registerBand: registerBandMap.get(node.id) ?? 1,
-            degreeHint:
-              node.id === selectedNode.id
-                ? anchorDegree
-                : RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length],
+          const event = createResonanceEvent(
+            node,
+            selectedNode.id,
+            index,
+            localNodes.length,
             batchId,
-            batchRole: getBatchRole(index, localNodes.length),
-            source: "resonance"
-          };
+            timestamp,
+            registerBandMap,
+            anchorDegree
+          );
 
           appendEvent(event);
           audio.trigger(event);
         });
 
         schedulePhrase();
-      }, phraseDelay);
+      }, pickDelay(delayRange));
     };
 
     schedulePhrase();
