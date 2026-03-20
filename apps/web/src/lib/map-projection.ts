@@ -2,19 +2,19 @@ import { geoNaturalEarth1, geoPath, type GeoProjection } from "d3-geo";
 import landTopology from "world-atlas/land-110m.json";
 import { feature } from "topojson-client";
 
-type ProjectedPoint = {
+export type ProjectedPoint = {
   x: number;
   y: number;
 };
 
-type MapBounds = {
+export type MapBounds = {
   minX: number;
   minY: number;
   maxX: number;
   maxY: number;
 };
 
-type WorldMapProjection = {
+export type WorldMapProjection = {
   width: number;
   height: number;
   bounds: MapBounds;
