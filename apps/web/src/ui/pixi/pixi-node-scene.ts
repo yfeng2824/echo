@@ -1,7 +1,8 @@
-import { CanvasSource, Container, Graphics, Sprite, Texture } from "pixi.js";
-import type { EchoEvent } from "@echo/contracts";
+import { CanvasSource, Container, Graphics, Sprite, Text, TextStyle, Texture } from "pixi.js";
+import type { EchoEvent, EchoNode } from "@echo/contracts";
 import type { CollisionBurst, RenderCallbacks, RenderContext, RenderSnapshot, VisualProfile } from "./pixi-types";
-import { getNodeEntryState } from "./pixi-transition-layer";
+import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer";
+import { getDisplayNodeId } from "../../lib/node-id";
 
 type NodeSceneLayer = {
   root: Container;
@@ -12,6 +13,24 @@ type NodeSceneLayer = {
   rippleGraphics: Graphics;
   nodeGraphics: Graphics;
   burstGraphics: Graphics;
+  label: Text;
+};
+
+type NodeSceneTransition = {
+  fromNodeId: string;
+  toNodeId: string;
+  startedAt: number;
+} | null;
+
+type NodeSceneHoverState = {
+  hoveredPeerNodeId: string | null;
+};
+
+type NodeLayoutPoint = {
+  x: number;
+  y: number;
+  size: number;
+  events: EchoEvent[];
 };
 
 export function createNodeSceneLayer() {
@@ -29,8 +48,22 @@ export function createNodeSceneLayer() {
   const rippleGraphics = new Graphics();
   const nodeGraphics = new Graphics();
   const burstGraphics = new Graphics();
+  const label = new Text({
+    text: "",
+    style: new TextStyle({
+      fontFamily: "Inter, sans-serif",
+      fontSize: 10,
+      fill: 0xffffff,
+      letterSpacing: 0.3
+    })
+  });
 
-  root.addChild(mapSprite, lineGraphics, rippleGraphics, nodeGraphics, burstGraphics);
+  label.visible = false;
+  label.alpha = 0.74;
+  label.roundPixels = true;
+  label.resolution = Math.min(window.devicePixelRatio || 1, 2);
+
+  root.addChild(mapSprite, lineGraphics, rippleGraphics, nodeGraphics, burstGraphics, label);
 
   return {
     root,
@@ -40,7 +73,8 @@ export function createNodeSceneLayer() {
     lineGraphics,
     rippleGraphics,
     nodeGraphics,
-    burstGraphics
+    burstGraphics,
+    label
   } satisfies NodeSceneLayer;
 }
 
@@ -86,48 +120,26 @@ function getNodeEvents(events: EchoEvent[], nodeId: string) {
   return events.filter((event) => event.nodeId === nodeId);
 }
 
-export function renderNodeScene(
-  layer: NodeSceneLayer,
-  snapshot: RenderSnapshot,
+function buildNodeLayout(
+  nodes: EchoNode[],
+  selectedNodeId: string,
+  recentEvents: EchoEvent[],
   context: RenderContext,
   localLayoutSeed: number,
-  collisionHistory: Map<string, number>,
-  collisionAudioHistory: Map<string, number>,
-  collisionBursts: CollisionBurst[],
-  callbacks: RenderCallbacks,
-  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile,
-  maxRippleLayer: number
+  entryEase: number,
+  peerEntryEase: number
 ) {
-  const { nodes, selectedNodeId, recentEvents, nodeSceneEnteredAt } = snapshot;
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
-
-  layer.root.visible = true;
-  layer.root.position.set(0, 0);
-  layer.root.scale.set(1);
-  layer.lineGraphics.clear();
-  layer.rippleGraphics.clear();
-  layer.nodeGraphics.clear();
-  layer.burstGraphics.clear();
-
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
   if (!selectedNode) {
-    return collisionBursts;
+    return null;
   }
 
   const width = context.width;
   const height = context.height;
   const centerX = Math.round(width / 2);
   const centerY = Math.round(height / 2);
-  const { entryEase, peerEntryEase, lineEntryEase, mapFade } = getNodeEntryState(
-    nodeSceneEnteredAt,
-    context.now
-  );
-  updateMapTexture(layer, context);
-  layer.mapSprite.alpha = mapFade;
-
-  const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
-  const localNodes = [selectedNode, ...peers];
   const baseRadius = Math.min(width, height) * 0.31;
-  const layout = new Map<string, { x: number; y: number; size: number; events: EchoEvent[] }>();
+  const layout = new Map<string, NodeLayoutPoint>();
   const selectedMapPosition =
     context.projection.project(selectedNode.lng, selectedNode.lat) ?? { x: centerX, y: centerY };
   const anchorX = Math.round(selectedMapPosition.x + (centerX - selectedMapPosition.x) * entryEase);
@@ -139,6 +151,8 @@ export function renderNodeScene(
     size: 3 + entryEase * 5,
     events: getNodeEvents(recentEvents, selectedNode.id)
   });
+
+  const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
 
   peers.forEach((peer, index) => {
     const hash = hashString(peer.id);
@@ -159,16 +173,218 @@ export function renderNodeScene(
     });
   });
 
-  peers.forEach((peer) => {
-    const peerLayout = layout.get(peer.id);
-    if (!peerLayout) {
-      return;
+  return {
+    selectedNode,
+    peers,
+    layout,
+    anchorX,
+    anchorY
+  };
+}
+
+function getNodeSceneTransitionEase(
+  transition: NodeSceneTransition,
+  selectedNodeId: string | null,
+  now: number
+) {
+  if (!transition || !selectedNodeId || transition.toNodeId !== selectedNodeId) {
+    return 1;
+  }
+
+  const progress = clamp((now - transition.startedAt) / 580, 0, 1);
+  return easeOutCubic(progress);
+}
+
+function blendNodePoint(previous: NodeLayoutPoint | null, target: NodeLayoutPoint | null, transitionEase: number) {
+  if (previous && target) {
+    return {
+      x: previous.x + (target.x - previous.x) * transitionEase,
+      y: previous.y + (target.y - previous.y) * transitionEase,
+      size: previous.size + (target.size - previous.size) * transitionEase,
+      events: target.events,
+      visibility: 0.45 + transitionEase * 0.55
+    };
+  }
+
+  if (target) {
+    return {
+      ...target,
+      visibility: Math.max(0.2, transitionEase)
+    };
+  }
+
+  if (!previous) {
+    return null;
+  }
+
+  return {
+    ...previous,
+    events: [],
+    visibility: 1 - transitionEase
+  };
+}
+
+function findPeerNodeAtPoint(
+  nodes: EchoNode[],
+  layout: Map<string, NodeLayoutPoint>,
+  selectedNodeId: string,
+  clientX: number,
+  clientY: number,
+  options?: {
+    preferredNodeId?: string | null;
+    hitRadius?: number;
+    stickiness?: number;
+  }
+) {
+  const preferredNodeId = options?.preferredNodeId ?? null;
+  const hitRadius = options?.hitRadius ?? 18;
+  const stickiness = options?.stickiness ?? 8;
+  let nearestNode: EchoNode | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  let preferredDistance = Number.POSITIVE_INFINITY;
+
+  for (const node of nodes) {
+    if (node.id === selectedNodeId) {
+      continue;
     }
 
-    layer.lineGraphics.moveTo(anchorX, anchorY);
-    layer.lineGraphics.lineTo(peerLayout.x, peerLayout.y);
-    layer.lineGraphics.stroke({ color: 0xffffff, alpha: lineEntryEase * 0.1, width: 1 });
-  });
+    const point = layout.get(node.id);
+    if (!point) {
+      continue;
+    }
+
+    const distance = Math.hypot(clientX - point.x, clientY - point.y);
+
+    if (node.id === preferredNodeId) {
+      preferredDistance = distance;
+    }
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestNode = node;
+    }
+  }
+
+  if (!nearestNode || nearestDistance > hitRadius) {
+    return null;
+  }
+
+  if (
+    preferredNodeId &&
+    preferredDistance <= hitRadius + stickiness &&
+    preferredDistance <= nearestDistance + stickiness
+  ) {
+    return nodes.find((node) => node.id === preferredNodeId) ?? nearestNode;
+  }
+
+  return nearestNode;
+}
+
+export function findNodeScenePeerAtPoint(
+  snapshot: RenderSnapshot,
+  context: RenderContext,
+  localLayoutSeed: number,
+  clientX: number,
+  clientY: number,
+  options?: {
+    preferredNodeId?: string | null;
+    hitRadius?: number;
+    stickiness?: number;
+  }
+) {
+  const selectedNodeId = snapshot.selectedNodeId ?? snapshot.nodes[0]?.id;
+  if (!selectedNodeId) {
+    return null;
+  }
+
+  const { entryEase, peerEntryEase } = getNodeEntryState(snapshot.nodeSceneEnteredAt, context.now);
+  const nodeLayout = buildNodeLayout(
+    snapshot.nodes,
+    selectedNodeId,
+    snapshot.recentEvents,
+    context,
+    localLayoutSeed,
+    entryEase,
+    peerEntryEase
+  );
+
+  if (!nodeLayout) {
+    return null;
+  }
+
+  return findPeerNodeAtPoint(
+    snapshot.nodes,
+    nodeLayout.layout,
+    selectedNodeId,
+    clientX,
+    clientY,
+    options
+  );
+}
+
+export function renderNodeScene(
+  layer: NodeSceneLayer,
+  snapshot: RenderSnapshot,
+  hoverState: NodeSceneHoverState,
+  nodeTransition: NodeSceneTransition,
+  context: RenderContext,
+  localLayoutSeed: number,
+  collisionHistory: Map<string, number>,
+  collisionBursts: CollisionBurst[],
+  callbacks: RenderCallbacks,
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile,
+  maxRippleLayer: number
+) {
+  const { nodes, selectedNodeId, recentEvents, nodeSceneEnteredAt } = snapshot;
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
+
+  layer.root.visible = true;
+  layer.root.position.set(0, 0);
+  layer.root.scale.set(1);
+  layer.lineGraphics.clear();
+  layer.rippleGraphics.clear();
+  layer.nodeGraphics.clear();
+  layer.burstGraphics.clear();
+  layer.label.visible = false;
+
+  if (!selectedNode) {
+    return collisionBursts;
+  }
+
+  const { entryEase, peerEntryEase, lineEntryEase, mapFade } = getNodeEntryState(
+    nodeSceneEnteredAt,
+    context.now
+  );
+  const targetLayout = buildNodeLayout(
+    nodes,
+    selectedNode.id,
+    recentEvents,
+    context,
+    localLayoutSeed,
+    entryEase,
+    peerEntryEase
+  );
+
+  if (!targetLayout) {
+    return collisionBursts;
+  }
+
+  const transitionEase = getNodeSceneTransitionEase(nodeTransition, selectedNode.id, context.now);
+  const previousLayout =
+    transitionEase < 1 && nodeTransition
+      ? buildNodeLayout(
+          nodes,
+          nodeTransition.fromNodeId,
+          recentEvents,
+          context,
+          localLayoutSeed,
+          entryEase,
+          peerEntryEase
+        )
+      : null;
+
+  updateMapTexture(layer, context);
+  layer.mapSprite.alpha = mapFade;
 
   const activeRipples: Array<{
     nodeId: string;
@@ -181,13 +397,61 @@ export function renderNodeScene(
     rippleLayer: number;
   }> = [];
 
-  localNodes.forEach((node, index) => {
-    const nodeLayout = layout.get(node.id);
-    if (!nodeLayout) {
+  if (previousLayout && transitionEase < 1) {
+    previousLayout.peers.forEach((peer) => {
+      const peerLayout = previousLayout.layout.get(peer.id);
+      if (!peerLayout) {
+        return;
+      }
+
+      layer.lineGraphics.moveTo(previousLayout.anchorX, previousLayout.anchorY);
+      layer.lineGraphics.lineTo(peerLayout.x, peerLayout.y);
+      layer.lineGraphics.stroke({
+        color: 0xffffff,
+        alpha: lineEntryEase * 0.1 * (1 - transitionEase),
+        width: 1
+      });
+    });
+  }
+
+  targetLayout.peers.forEach((peer) => {
+    const peerLayout = targetLayout.layout.get(peer.id);
+    if (!peerLayout) {
       return;
     }
 
-    const activeNodeRipples = nodeLayout.events
+    layer.lineGraphics.moveTo(targetLayout.anchorX, targetLayout.anchorY);
+    layer.lineGraphics.lineTo(peerLayout.x, peerLayout.y);
+    layer.lineGraphics.stroke({
+      color: 0xffffff,
+      alpha: lineEntryEase * 0.1 * Math.max(transitionEase, 0.35),
+      width: 1
+    });
+  });
+
+  const renderNodeIds = new Set<string>(targetLayout.layout.keys());
+  if (previousLayout) {
+    for (const nodeId of previousLayout.layout.keys()) {
+      renderNodeIds.add(nodeId);
+    }
+  }
+
+  const renderNodes = Array.from(renderNodeIds)
+    .map((nodeId) => nodes.find((node) => node.id === nodeId))
+    .filter((node): node is EchoNode => Boolean(node));
+
+  renderNodes.forEach((node, index) => {
+    const point = blendNodePoint(
+      previousLayout?.layout.get(node.id) ?? null,
+      targetLayout.layout.get(node.id) ?? null,
+      transitionEase
+    );
+
+    if (!point || point.visibility <= 0.01) {
+      return;
+    }
+
+    const activeNodeRipples = point.events
       .map((event) => {
         const profile = getVisualProfile(event, "node");
         const age = context.now - new Date(event.at).getTime();
@@ -207,55 +471,67 @@ export function renderNodeScene(
       0
     );
     const pulse = Math.max(0.14, Math.min(1.5, pulseEnergy));
-    const nodeEntryScale =
-      node.id === selectedNode.id ? 0.8 + entryEase * 0.9 : 0.08 + peerEntryEase * 0.92;
+    const isSelectedNode = node.id === selectedNode.id;
+    const isHoveredPeer = hoverState.hoveredPeerNodeId === node.id && !isSelectedNode;
+    const nodeEntryScale = isSelectedNode ? 0.8 + entryEase * 0.9 : 0.08 + peerEntryEase * 0.92;
+    const hoverHaloBoost = isHoveredPeer ? 7 : 0;
+    const hoverAlphaBoost = isHoveredPeer ? 0.12 : 0;
     const haloSize =
-      node.id === selectedNode.id
+      isSelectedNode
         ? (18 + pulse * 28 + Math.sin(context.time * 0.001 + index) * 2) * (0.95 + entryEase * 0.3)
-        : (11 + pulse * 14 + Math.sin(context.time * 0.001 + index) * 1.2) * nodeEntryScale;
+        : (11 + pulse * 14 + Math.sin(context.time * 0.001 + index) * 1.2) * nodeEntryScale +
+          hoverHaloBoost;
 
     for (const ripple of activeNodeRipples) {
       const rippleRadius = 12 + ripple.progress * ripple.profile.radius;
-      const rippleAlpha = (1 - ripple.progress) * ripple.profile.alpha;
+      const rippleAlpha = (1 - ripple.progress) * ripple.profile.alpha * point.visibility;
 
       activeRipples.push({
         nodeId: node.id,
         eventId: ripple.event.id,
         batchId: ripple.event.batchId,
-        x: nodeLayout.x,
-        y: nodeLayout.y,
+        x: point.x,
+        y: point.y,
         radius: rippleRadius,
         intensity: ripple.event.intensity,
         rippleLayer: ripple.event.rippleLayer ?? 0
       });
 
-      layer.rippleGraphics.circle(nodeLayout.x, nodeLayout.y, rippleRadius);
+      layer.rippleGraphics.circle(point.x, point.y, rippleRadius);
       layer.rippleGraphics.stroke({
         color: 0xffffff,
-        alpha: rippleAlpha * (node.id === selectedNode.id ? 1 : peerEntryEase),
-        width: node.id === selectedNode.id ? 2.4 : 1.8
+        alpha: rippleAlpha * (isSelectedNode ? 1 : peerEntryEase),
+        width: isSelectedNode ? 2.4 : isHoveredPeer ? 2.2 : 1.8
       });
     }
 
-    layer.nodeGraphics.circle(nodeLayout.x, nodeLayout.y, haloSize);
+    layer.nodeGraphics.circle(point.x, point.y, haloSize);
     layer.nodeGraphics.fill({
       color: 0xffffff,
       alpha:
-        node.id === selectedNode.id
+        (isSelectedNode
           ? 0.05 + pulse * 0.12
-          : (0.025 + pulse * 0.075) * peerEntryEase
+          : (0.025 + pulse * 0.075 + hoverAlphaBoost) * peerEntryEase) * point.visibility
     });
 
     layer.nodeGraphics.circle(
-      nodeLayout.x,
-      nodeLayout.y,
-      (node.id === selectedNode.id ? nodeLayout.size + pulse * 2.4 : nodeLayout.size + pulse) *
-        nodeEntryScale
+      point.x,
+      point.y,
+      ((isSelectedNode ? point.size + pulse * 2.4 : point.size + pulse + (isHoveredPeer ? 0.9 : 0)) *
+        nodeEntryScale) /
+        (isSelectedNode ? 1 : 1 - Math.min(0.28, (1 - point.visibility) * 0.3))
     );
     layer.nodeGraphics.fill({
       color: 0xffffff,
-      alpha: node.id === selectedNode.id ? 0.94 : 0.9 * peerEntryEase
+      alpha: (isSelectedNode ? 0.94 : (isHoveredPeer ? 0.98 : 0.9) * peerEntryEase) * point.visibility
     });
+
+    if (isHoveredPeer) {
+      layer.label.text = getDisplayNodeId(node);
+      layer.label.x = point.x + haloSize + 8;
+      layer.label.y = point.y - 6;
+      layer.label.visible = true;
+    }
   });
 
   for (let leftIndex = 0; leftIndex < activeRipples.length; leftIndex += 1) {
@@ -308,15 +584,9 @@ export function renderNodeScene(
         rightNodeId: rightRipple.nodeId
       });
 
-      const collisionBatchKey =
-        leftRipple.batchId && rightRipple.batchId
-          ? [leftRipple.batchId, rightRipple.batchId].sort().join(":")
-          : collisionKey;
-      const lastCollisionAudioAt = collisionAudioHistory.get(collisionBatchKey) ?? 0;
       const nextRippleLayer = Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1;
 
-      if (nextRippleLayer <= maxRippleLayer && context.now - lastCollisionAudioAt > 900) {
-        collisionAudioHistory.set(collisionBatchKey, context.now);
+      if (nextRippleLayer <= maxRippleLayer) {
         callbacks.emitCollisionEcho(leftRipple, rightRipple, collisionKey);
       }
     }
@@ -339,12 +609,6 @@ export function renderNodeScene(
   for (const [key, createdAt] of collisionHistory.entries()) {
     if (context.now - createdAt > 2600) {
       collisionHistory.delete(key);
-    }
-  }
-
-  for (const [key, createdAt] of collisionAudioHistory.entries()) {
-    if (context.now - createdAt > 2600) {
-      collisionAudioHistory.delete(key);
     }
   }
 

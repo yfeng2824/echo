@@ -18,6 +18,7 @@
 - Keep the map treatment atmospheric; avoid dashboard or political-map styling.
 - Keep transitions continuous; avoid cut-style scene changes.
 - Keep interactions lightweight; prefer overlays over layout-shifting feedback.
+- Invalid manual node URLs should trigger explicit "not found" UX, not silent fallback.
 - Preserve desktop-first quality.
 
 ## Data And Audio Rules

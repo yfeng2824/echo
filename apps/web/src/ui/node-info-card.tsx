@@ -70,7 +70,7 @@ export function NodeInfoCard({ node, visible }: NodeInfoCardProps) {
         </span>
       </div>
       <div className="scene__card-row">
-        <span className="scene__card-label">Node</span>
+        <span className="scene__card-label">Alias</span>
         <span className="scene__card-value">{node.label}</span>
       </div>
       <div className="scene__card-row">

@@ -201,6 +201,8 @@
   justify-content: flex-end;
   gap: 8px;
   min-width: 0;
+  overflow: visible;
+  text-overflow: clip;
 }
 
 .scene__card-value--inline > span:first-child {
@@ -235,10 +237,14 @@
   position: absolute;
   right: calc(100% + 8px);
   top: 50%;
+  z-index: 3;
+  padding: 4px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.92);
   opacity: 0;
-  color: rgba(255, 255, 255, 0.55);
-  font-size: 12px;
-  letter-spacing: 0.12em;
+  color: rgba(255, 255, 255, 0.92);
+  font-size: 11px;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
   white-space: nowrap;
   transform: translateY(-50%);

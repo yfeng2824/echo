@@ -2,7 +2,7 @@ import { AccessibilitySystem, Application, Container } from "pixi.js";
 import type { EchoEvent } from "@echo/contracts";
 import { createWorldMapProjection, type WorldMapProjection } from "../../lib/map-projection";
 import { createMapSceneLayer, findMapNodeAtPoint, renderMapScene } from "./pixi-map-scene";
-import { createNodeSceneLayer, renderNodeScene } from "./pixi-node-scene";
+import { createNodeSceneLayer, findNodeScenePeerAtPoint, renderNodeScene } from "./pixi-node-scene";
 import type { CollisionBurst, RenderSnapshot, VisualProfile } from "./pixi-types";
 
 type PixiSurfaceOptions = {
@@ -19,7 +19,6 @@ export class PixiSurface {
   private readonly mapLayer = createMapSceneLayer();
   private readonly nodeLayer = createNodeSceneLayer();
   private readonly collisionHistory = new Map<string, number>();
-  private readonly collisionAudioHistory = new Map<string, number>();
   private collisionBursts: CollisionBurst[] = [];
   private snapshot: RenderSnapshot = {
     activeScene: "map",
@@ -31,6 +30,12 @@ export class PixiSurface {
   };
   private localLayoutSeed = 0;
   private hoveredNodeId: string | null = null;
+  private hoveredPeerNodeId: string | null = null;
+  private nodeSceneTransition: {
+    fromNodeId: string;
+    toNodeId: string;
+    startedAt: number;
+  } | null = null;
   private width = window.innerWidth;
   private height = window.innerHeight;
   private dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -40,6 +45,7 @@ export class PixiSurface {
   private initialized = false;
   private handlePointerMove: ((event: PointerEvent) => void) | null = null;
   private handleClick: ((event: MouseEvent) => void) | null = null;
+  private handlePointerLeave: (() => void) | null = null;
 
   constructor(private readonly options: PixiSurfaceOptions) {}
 
@@ -77,18 +83,45 @@ export class PixiSurface {
     const shouldReseed =
       nextSnapshot.activeScene === "node" &&
       nextSnapshot.selectedNodeId &&
-      (nextSnapshot.selectedNodeId !== this.snapshot.selectedNodeId ||
-        this.snapshot.activeScene !== "node");
+      this.snapshot.activeScene !== "node";
+
+    const nodeSceneSelectionChanged =
+      this.snapshot.activeScene === "node" &&
+      nextSnapshot.activeScene === "node" &&
+      this.snapshot.selectedNodeId !== null &&
+      nextSnapshot.selectedNodeId !== null &&
+      nextSnapshot.selectedNodeId !== this.snapshot.selectedNodeId;
 
     if (shouldReseed) {
       this.localLayoutSeed = Math.random() * 100000;
       this.collisionHistory.clear();
-      this.collisionAudioHistory.clear();
       this.collisionBursts = [];
+    }
+
+    if (nodeSceneSelectionChanged) {
+      const fromNodeId = this.snapshot.selectedNodeId;
+      const toNodeId = nextSnapshot.selectedNodeId;
+      if (!fromNodeId || !toNodeId) {
+        this.nodeSceneTransition = null;
+      } else {
+        this.nodeSceneTransition = {
+          fromNodeId,
+          toNodeId,
+          startedAt: Date.now()
+        };
+      }
+    } else if (nextSnapshot.activeScene !== "node") {
+      this.nodeSceneTransition = null;
     }
 
     if (nextSnapshot.activeScene !== "map") {
       this.hoveredNodeId = null;
+    }
+    if (nextSnapshot.activeScene !== "node") {
+      this.hoveredPeerNodeId = null;
+    }
+    if (nextSnapshot.selectedNodeId !== this.snapshot.selectedNodeId) {
+      this.hoveredPeerNodeId = null;
     }
 
     this.snapshot = nextSnapshot;
@@ -109,6 +142,9 @@ export class PixiSurface {
     }
     if (this.handleClick) {
       this.app.canvas.removeEventListener("click", this.handleClick);
+    }
+    if (this.handlePointerLeave) {
+      this.app.canvas.removeEventListener("pointerleave", this.handlePointerLeave);
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
@@ -143,24 +179,64 @@ export class PixiSurface {
     this.syncViewportSize();
   };
 
+  private getRenderContext(now = Date.now(), time = performance.now()) {
+    return {
+      now,
+      time,
+      width: this.width,
+      height: this.height,
+      dpr: this.dpr,
+      projection: this.projection
+    };
+  }
+
+  private findPeerNodeAtPointer(
+    clientX: number,
+    clientY: number,
+    options?: {
+      preferredNodeId?: string | null;
+      hitRadius?: number;
+      stickiness?: number;
+    }
+  ) {
+    return findNodeScenePeerAtPoint(
+      this.snapshot,
+      this.getRenderContext(),
+      this.localLayoutSeed,
+      clientX,
+      clientY,
+      options
+    );
+  }
+
   private bindPointerEvents() {
     this.handlePointerMove = (event: PointerEvent) => {
       if (this.snapshot.activeScene !== "map") {
+        if (this.snapshot.activeScene === "node") {
+          const peerNode = this.findPeerNodeAtPointer(
+            event.clientX,
+            event.clientY,
+            {
+              preferredNodeId: this.hoveredPeerNodeId,
+              hitRadius: 22,
+              stickiness: 10
+            }
+          );
+
+          this.hoveredPeerNodeId = peerNode?.id ?? null;
+          this.app.canvas.style.cursor = peerNode ? "pointer" : "default";
+          return;
+        }
+
         this.app.canvas.style.cursor = "default";
         this.hoveredNodeId = null;
+        this.hoveredPeerNodeId = null;
         return;
       }
 
       const node = findMapNodeAtPoint(
         this.snapshot.nodes,
-        {
-          now: Date.now(),
-          time: performance.now(),
-          width: this.width,
-          height: this.height,
-          dpr: this.dpr,
-          projection: this.projection
-        },
+        this.getRenderContext(),
         event.clientX,
         event.clientY,
         {
@@ -176,19 +252,25 @@ export class PixiSurface {
 
     this.handleClick = (event: MouseEvent) => {
       if (this.snapshot.activeScene !== "map") {
+        if (this.snapshot.activeScene === "node") {
+          const peerNode = this.findPeerNodeAtPointer(
+            event.clientX,
+            event.clientY,
+            {
+              hitRadius: 24
+            }
+          );
+
+          if (peerNode) {
+            this.options.selectNode(peerNode.id);
+          }
+        }
         return;
       }
 
       const node = findMapNodeAtPoint(
         this.snapshot.nodes,
-        {
-          now: Date.now(),
-          time: performance.now(),
-          width: this.width,
-          height: this.height,
-          dpr: this.dpr,
-          projection: this.projection
-        },
+        this.getRenderContext(),
         event.clientX,
         event.clientY,
         {
@@ -201,8 +283,15 @@ export class PixiSurface {
       }
     };
 
+    this.handlePointerLeave = () => {
+      this.hoveredNodeId = null;
+      this.hoveredPeerNodeId = null;
+      this.app.canvas.style.cursor = "default";
+    };
+
     this.app.canvas.addEventListener("pointermove", this.handlePointerMove);
     this.app.canvas.addEventListener("click", this.handleClick);
+    this.app.canvas.addEventListener("pointerleave", this.handlePointerLeave);
     window.addEventListener("resize", this.resize);
     window.visualViewport?.addEventListener("resize", this.resize);
     window.visualViewport?.addEventListener("scroll", this.resize);
@@ -220,14 +309,7 @@ export class PixiSurface {
     // Keep projection synced even when layout changes without a window resize event.
     this.syncViewportSize();
 
-    const context = {
-      now: Date.now(),
-      time: performance.now(),
-      width: this.width,
-      height: this.height,
-      dpr: this.dpr,
-      projection: this.projection
-    };
+    const context = this.getRenderContext();
 
     this.mapLayer.root.visible = this.snapshot.activeScene === "map";
     this.nodeLayer.root.visible = this.snapshot.activeScene === "node";
@@ -242,10 +324,11 @@ export class PixiSurface {
     this.collisionBursts = renderNodeScene(
       this.nodeLayer,
       this.snapshot,
+      { hoveredPeerNodeId: this.hoveredPeerNodeId },
+      this.nodeSceneTransition,
       context,
       this.localLayoutSeed,
       this.collisionHistory,
-      this.collisionAudioHistory,
       this.collisionBursts,
       {
         emitCollisionEcho: (leftRipple, rightRipple, collisionKey) => {
