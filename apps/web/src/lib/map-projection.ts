@@ -32,14 +32,15 @@ export function createWorldMapProjection(
   height: number
 ): WorldMapProjection {
   const projection = geoNaturalEarth1();
-  const horizontalPadding = Math.min(width * 0.08, 96);
-  const topPadding = Math.min(height * 0.16, 120);
-  const bottomPadding = Math.min(height * 0.18, 132);
+  const clamp = (value: number, min: number, max: number) =>
+    Math.max(min, Math.min(max, value));
+  const horizontalPadding = clamp(width * 0.045, 8, 64);
+  const verticalPadding = clamp(height * 0.09, 20, 92);
 
   projection.fitExtent(
     [
-      [horizontalPadding, topPadding],
-      [width - horizontalPadding, height - bottomPadding]
+      [horizontalPadding, verticalPadding],
+      [width - horizontalPadding, height - verticalPadding]
     ],
     landFeature
   );

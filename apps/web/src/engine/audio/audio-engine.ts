@@ -1,5 +1,6 @@
 import type {
   AudioEngine,
+  AudioRoot,
   AudioSettings,
   DegreeHint,
   EchoEvent,
@@ -7,6 +8,7 @@ import type {
   RegisterBand,
   SceneId
 } from "@echo/contracts";
+import { getBandBaseOctave, resolvePentatonicByInterval } from "../../lib/pentatonic";
 
 type ActiveTransientVoice = {
   gain: GainNode;
@@ -17,57 +19,76 @@ type ActiveTransientVoice = {
   stop: () => void;
 };
 
-const DEGREE_TO_SEMITONE: Record<DegreeHint, number> = {
-  gong: 0,
-  shang: 2,
-  jue: 4,
-  zhi: 7,
-  yu: 9
-};
-
-const REGISTER_TO_OCTAVE: Record<RegisterBand, number> = {
-  1: 2,
-  2: 3,
-  3: 4,
-  4: 5
-};
-
-const WEIGHTED_DEGREES: Record<RegisterBand, Array<{ degree: DegreeHint; weight: number }>> = {
+const WEIGHTED_INTERVALS: Record<RegisterBand, Array<{ interval: number; weight: number }>> = {
   1: [
-    { degree: "gong", weight: 5 },
-    { degree: "shang", weight: 3 },
-    { degree: "zhi", weight: 4 }
+    { interval: 0, weight: 5 },
+    { interval: 2, weight: 3 },
+    { interval: 7, weight: 4 }
   ],
   2: [
-    { degree: "gong", weight: 4 },
-    { degree: "shang", weight: 3 },
-    { degree: "jue", weight: 2 },
-    { degree: "zhi", weight: 4 }
+    { interval: 0, weight: 4 },
+    { interval: 2, weight: 3 },
+    { interval: 4, weight: 2 },
+    { interval: 7, weight: 4 }
   ],
   3: [
-    { degree: "shang", weight: 3 },
-    { degree: "jue", weight: 4 },
-    { degree: "zhi", weight: 4 },
-    { degree: "yu", weight: 3 }
+    { interval: 2, weight: 3 },
+    { interval: 4, weight: 4 },
+    { interval: 7, weight: 4 },
+    { interval: 9, weight: 3 }
   ],
   4: [
-    { degree: "jue", weight: 4 },
-    { degree: "zhi", weight: 5 },
-    { degree: "yu", weight: 4 }
+    { interval: 4, weight: 4 },
+    { interval: 7, weight: 5 },
+    { interval: 9, weight: 4 }
   ]
 };
 
-const CHORD_PRIORITY: Record<number, DegreeHint[]> = {
-  1: ["gong"],
-  2: ["gong", "zhi"],
-  3: ["gong", "zhi", "yu"],
-  4: ["gong", "shang", "zhi", "yu"]
+const CHORD_PRIORITY_INTERVALS_BY_BAND: Record<RegisterBand, Record<number, number[]>> = {
+  1: {
+    1: [0],
+    2: [0, 7],
+    3: [0, 7, 9],
+    4: [0, 2, 7, 9]
+  },
+  2: {
+    1: [0],
+    2: [0, 7],
+    3: [0, 7, 9],
+    4: [0, 2, 7, 9]
+  },
+  3: {
+    1: [0],
+    2: [0, 7],
+    3: [0, 7, 9],
+    4: [0, 2, 7, 9]
+  },
+  4: {
+    1: [0],
+    2: [0, 7],
+    3: [0, 7, 9],
+    4: [0, 2, 7, 9]
+  }
+};
+
+const ROOT_SEMITONE: Record<AudioRoot, number> = {
+  C: 0,
+  "C#": 1,
+  D: 2,
+  "D#": 3,
+  E: 4,
+  F: 5,
+  "F#": 6,
+  G: 7,
+  "G#": 8,
+  A: 9,
+  "A#": 10,
+  B: 11
 };
 
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
   let audioContext: AudioContext | null = null;
-  let knownNodes: EchoNode[] = [];
   let ambientMaster: GainNode | null = null;
   let ambientBedVoices: Array<{ oscillator: OscillatorNode; gain: GainNode; filter: BiquadFilterNode }> =
     [];
@@ -75,8 +96,9 @@ export function createAudioEngine(): AudioEngine {
   let lastDegreeByNode = new Map<string, DegreeHint>();
   let activeTransientVoices: ActiveTransientVoice[] = [];
   let settings: AudioSettings = {
-    density: "sparse",
-    timbrePreset: "guqin"
+    density: "balanced",
+    timbrePreset: "standard",
+    root: "C"
   };
 
   const ensureAudioContext = async () => {
@@ -85,22 +107,34 @@ export function createAudioEngine(): AudioEngine {
     }
 
     if (audioContext.state === "suspended") {
-      await audioContext.resume();
+      try {
+        await audioContext.resume();
+      } catch {
+        // Autoplay policy can block resume until user interaction; keep running silently.
+      }
     }
 
     return audioContext;
   };
 
   const getRootFrequency = () => {
-    const d2Midi = 38;
-    return 440 * Math.pow(2, (d2Midi - 69) / 12);
+    const rootMidi = 36 + ROOT_SEMITONE[settings.root];
+    return 440 * Math.pow(2, (rootMidi - 69) / 12);
   };
 
+  const getWeightedPitchesForBand = (band: RegisterBand) =>
+    WEIGHTED_INTERVALS[band].map(({ interval, weight }) => ({
+      degree: resolvePentatonicByInterval(settings.root, getBandBaseOctave(band), interval),
+      weight
+    }));
+
+  const getChordPriorityByBand = (band: RegisterBand, voiceCount: number) =>
+    (CHORD_PRIORITY_INTERVALS_BY_BAND[band][Math.min(voiceCount, 4)] ?? []).map((interval) =>
+      resolvePentatonicByInterval(settings.root, getBandBaseOctave(band), interval)
+    );
+
   const refreshTopologyBands = (nodes: EchoNode[]) => {
-    knownNodes = nodes;
-    const liveNodes = [...nodes]
-      .filter((node) => node.status === "live")
-      .sort((left, right) => {
+    const liveNodes = [...nodes].sort((left, right) => {
         const degreeDelta = left.peers.length - right.peers.length;
         if (degreeDelta !== 0) {
           return degreeDelta;
@@ -119,10 +153,11 @@ export function createAudioEngine(): AudioEngine {
   };
 
   const chooseWeightedDegree = (band: RegisterBand, nodeId: string, excludedDegrees: DegreeHint[]) => {
-    const candidates = WEIGHTED_DEGREES[band].filter(
+    const weightedPitches = getWeightedPitchesForBand(band);
+    const candidates = weightedPitches.filter(
       ({ degree }) => !excludedDegrees.includes(degree)
     );
-    const pool = candidates.length > 0 ? candidates : WEIGHTED_DEGREES[band];
+    const pool = candidates.length > 0 ? candidates : weightedPitches;
     const lastDegree = lastDegreeByNode.get(nodeId);
     const filteredPool =
       lastDegree && pool.some(({ degree }) => degree !== lastDegree)
@@ -138,7 +173,7 @@ export function createAudioEngine(): AudioEngine {
       }
     }
 
-    return filteredPool[0]?.degree ?? "gong";
+    return filteredPool[0]?.degree ?? resolvePentatonicByInterval(settings.root, 3, 0);
   };
 
   const resolveDegree = (event: EchoEvent) => {
@@ -147,7 +182,7 @@ export function createAudioEngine(): AudioEngine {
 
     // Batch events prefer open pentatonic voicings before falling back to weighted choice.
     if (event.voiceCount && event.voiceCount > 1 && typeof event.voiceIndex === "number") {
-      const batchDegrees = CHORD_PRIORITY[Math.min(event.voiceCount, 4)];
+      const batchDegrees = getChordPriorityByBand(registerBand, event.voiceCount);
       if (event.degreeHint) {
         lastDegreeByNode.set(event.nodeId, event.degreeHint);
         return { degree: event.degreeHint, registerBand };
@@ -171,12 +206,22 @@ export function createAudioEngine(): AudioEngine {
   };
 
   const getFrequency = (event: EchoEvent) => {
-    const { degree, registerBand } = resolveDegree(event);
-    const rootFrequency = getRootFrequency();
-    const semitoneOffset =
-      DEGREE_TO_SEMITONE[degree] + (REGISTER_TO_OCTAVE[registerBand] - 2) * 12;
+    const { degree } = resolveDegree(event);
+    const [, note, accidental, octaveText] = degree.match(/^([A-G])(#{0,1})(\d)$/) ?? [];
+    const octave = Number(octaveText);
+    const semitoneByNote: Record<string, number> = {
+      C: 0,
+      D: 2,
+      E: 4,
+      F: 5,
+      G: 7,
+      A: 9,
+      B: 11
+    };
+    const semitone = semitoneByNote[note] + (accidental === "#" ? 1 : 0);
+    const midi = (octave + 1) * 12 + semitone;
 
-    return rootFrequency * Math.pow(2, semitoneOffset / 12);
+    return 440 * Math.pow(2, (midi - 69) / 12);
   };
 
   const cleanupVoices = () => {
@@ -253,7 +298,7 @@ export function createAudioEngine(): AudioEngine {
   };
 
   const startAmbient = async (nodes: EchoNode[]) => {
-    const liveNodes = nodes.filter((node) => node.status === "live");
+    const liveNodes = nodes;
     const context = await ensureAudioContext();
 
     refreshTopologyBands(nodes);
@@ -268,10 +313,10 @@ export function createAudioEngine(): AudioEngine {
     const densityBoost =
       settings.density === "rich" ? 1 : settings.density === "balanced" ? 0.8 : 0.6;
     const rootFrequency = getRootFrequency();
-    const supportDegree = averageIntensity > 0.58 ? "yu" : "zhi";
+    const supportSemitone = averageIntensity > 0.58 ? 9 : 7;
     const bedFrequencies = [
       rootFrequency,
-      rootFrequency * Math.pow(2, DEGREE_TO_SEMITONE[supportDegree] / 12)
+      rootFrequency * Math.pow(2, supportSemitone / 12)
     ];
 
     // The map bed stays to two quiet voices so discrete node triggers remain audible.
@@ -348,7 +393,7 @@ export function createAudioEngine(): AudioEngine {
       (batchRole === "lead" ? 1.15 : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
 
-    // Blend a short pluck, a resonant body, and a faint airy tail for the guqin-inspired voice.
+    // Blend a short pluck, a resonant body, and a faint airy tail for the default voice.
     const data = airBuffer.getChannelData(0);
     for (let index = 0; index < data.length; index += 1) {
       data[index] = (Math.random() * 2 - 1) * 0.16;

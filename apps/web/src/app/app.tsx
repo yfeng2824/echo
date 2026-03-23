@@ -13,6 +13,7 @@ import type {
 import { createAudioEngine } from "../engine/audio/audio-engine";
 import { createApiNetworkSimulation, fetchSceneBootstrap } from "../lib/api-client";
 import { buildRegisterBandMap } from "../lib/network";
+import { resolvePentatonicDegree, type ScaleDegreeKey } from "../lib/pentatonic";
 import { useSceneRouting } from "../scenes/use-scene-routing";
 import { useAppStore } from "../state/app-store";
 import type { NetworkStatus } from "../state/app-store";
@@ -34,15 +35,16 @@ type BootstrapLoadResult = {
   };
 };
 
-const AMBIENT_DEGREES: Record<number, DegreeHint[]> = {
-  1: ["gong"],
-  2: ["gong", "zhi"],
-  3: ["gong", "zhi", "yu"],
-  4: ["gong", "shang", "zhi", "yu"]
+const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
+  1: ["root"],
+  2: ["root", "fifth"],
+  3: ["root", "fifth", "sixth"],
+  4: ["root", "second", "fifth", "sixth"]
 };
 
-const RESONANCE_PEER_DEGREES: DegreeHint[] = ["shang", "jue", "yu", "zhi"];
+const RESONANCE_PEER_DEGREES: ScaleDegreeKey[] = ["second", "third", "sixth", "fifth"];
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
+const STARTUP_AUDIO_MUTE_MS = 1000;
 
 const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
   sparse: { min: 900, max: 1500 },
@@ -83,6 +85,14 @@ function getBatchRole(index: number, voiceCount: number): BatchRole {
   }
 
   return "support";
+}
+
+function resolvePitchForBand(
+  registerBand: RegisterBand,
+  root: AppStoreState["audioSettings"]["root"],
+  degree: ScaleDegreeKey
+): DegreeHint {
+  return resolvePentatonicDegree(root, registerBand, degree);
 }
 
 function pickDelay(range: DelayRange) {
@@ -158,6 +168,10 @@ function shouldTriggerEventAudio(
     return false;
   }
 
+  if (event.type === "path_used") {
+    return true;
+  }
+
   const selectedNode = getSelectedNode(state);
   return selectedNode ? event.nodeId === selectedNode.id || selectedNode.peers.includes(event.nodeId) : false;
 }
@@ -168,8 +182,11 @@ function createAmbientEvent(
   batchSize: number,
   batchId: string,
   timestamp: string,
-  registerBandMap: Map<string, RegisterBand>
+  registerBandMap: Map<string, RegisterBand>,
+  root: AppStoreState["audioSettings"]["root"]
 ): EchoEvent {
+  const registerBand = registerBandMap.get(node.id) ?? 1;
+
   return {
     id: `${batchId}-${index}-${node.id}`,
     type: "node_active",
@@ -178,8 +195,8 @@ function createAmbientEvent(
     intensity: Math.min(1, 0.35 + node.intensity * 0.65),
     voiceIndex: index,
     voiceCount: batchSize,
-    registerBand: registerBandMap.get(node.id) ?? 1,
-    degreeHint: AMBIENT_DEGREES[batchSize]?.[index],
+    registerBand,
+    degreeHint: resolvePitchForBand(registerBand, root, AMBIENT_DEGREES[batchSize]?.[index] ?? "root"),
     batchId,
     batchRole: getBatchRole(index, batchSize),
     source: "ambient"
@@ -194,9 +211,11 @@ function createResonanceEvent(
   batchId: string,
   timestamp: string,
   registerBandMap: Map<string, RegisterBand>,
-  anchorDegree: DegreeHint
+  anchorDegree: DegreeHint,
+  root: AppStoreState["audioSettings"]["root"]
 ): EchoEvent {
   const isSelectedNode = node.id === selectedNodeId;
+  const registerBand = registerBandMap.get(node.id) ?? 1;
 
   return {
     id: `${batchId}-${index}-${node.id}`,
@@ -208,10 +227,14 @@ function createResonanceEvent(
       : Math.min(0.86, 0.34 + node.intensity * 0.46),
     voiceIndex: index,
     voiceCount: batchSize,
-    registerBand: registerBandMap.get(node.id) ?? 1,
+    registerBand,
     degreeHint: isSelectedNode
       ? anchorDegree
-      : RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length],
+      : resolvePitchForBand(
+          registerBand,
+          root,
+          RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length]
+        ),
     batchId,
     batchRole: getBatchRole(index, batchSize),
     source: "resonance"
@@ -224,6 +247,7 @@ export function App() {
   const previousNetworkRef = useRef<AppStoreState["currentNetwork"] | null>(null);
   const previousTransitionVisibleRef = useRef(false);
   const [ambientTransientHoldUntil, setAmbientTransientHoldUntil] = useState(0);
+  const [startupAudioReady, setStartupAudioReady] = useState(false);
 
   const initialize = useAppStore((state) => state.initialize);
   const appendEvent = useAppStore((state) => state.appendEvent);
@@ -286,19 +310,38 @@ export function App() {
   }, [appendEvent, currentNetwork, initialize, setNetworkState]);
 
   useEffect(() => {
+    const timeoutId = window.setTimeout(() => {
+      setStartupAudioReady(true);
+    }, STARTUP_AUDIO_MUTE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!audio) {
       return;
     }
 
     audio.configure(audioSettings);
-    if (!audioEnabled || networkTransitionVisible) {
+    if (!audioEnabled || networkTransitionVisible || !startupAudioReady) {
       audio.disable();
       return;
     }
 
     audio.enable();
     audio.syncAmbient(isSearchFocusPhase ? "node" : activeScene, nodes);
-  }, [activeScene, audio, audioEnabled, audioSettings, isSearchFocusPhase, networkTransitionVisible, nodes]);
+  }, [
+    activeScene,
+    audio,
+    audioEnabled,
+    audioSettings,
+    isSearchFocusPhase,
+    networkTransitionVisible,
+    nodes,
+    startupAudioReady
+  ]);
 
   useEffect(() => {
     return () => {
@@ -342,7 +385,7 @@ export function App() {
       nodeId: mapSearchTransition.nodeId,
       intensity: 0.96,
       registerBand: registerBandMap.get(mapSearchTransition.nodeId) ?? 1,
-      degreeHint: "jue",
+      degreeHint: resolvePitchForBand(registerBandMap.get(mapSearchTransition.nodeId) ?? 1, audioSettings.root, "third"),
       batchRole: "lead",
       source: "network"
     };
@@ -351,14 +394,14 @@ export function App() {
     if (audioEnabled) {
       audio?.trigger(foundEvent);
     }
-  }, [appendEvent, audio, audioEnabled, mapSearchTransition, nodes]);
+  }, [appendEvent, audio, audioEnabled, audioSettings.root, mapSearchTransition, nodes]);
 
   useEffect(() => {
-    if (!audioEnabled || activeScene !== "map" || !audio || isSearchFocusPhase) {
+    if (activeScene !== "map" || isSearchFocusPhase) {
       return;
     }
 
-    const liveNodes = nodes.filter((node) => node.status === "live");
+    const liveNodes = nodes;
     if (liveNodes.length === 0) {
       return;
     }
@@ -400,9 +443,19 @@ export function App() {
 
         // Keep the map field distributed by letting a small batch speak together.
         batchNodes.forEach((node, index) => {
-          const event = createAmbientEvent(node, index, batchNodes.length, batchId, timestamp, registerBandMap);
+          const event = createAmbientEvent(
+            node,
+            index,
+            batchNodes.length,
+            batchId,
+            timestamp,
+            registerBandMap,
+            audioSettings.root
+          );
           appendEvent(event);
-          audio.trigger(event);
+          if (audioEnabled) {
+            audio?.trigger(event);
+          }
         });
 
         scheduleBatch();
@@ -421,12 +474,13 @@ export function App() {
     audio,
     audioEnabled,
     audioSettings.density,
+    audioSettings.root,
     isSearchFocusPhase,
     nodes
   ]);
 
   useEffect(() => {
-    if (!audioEnabled || activeScene !== "node" || !audio || !selectedNodeId) {
+    if (activeScene !== "node" || !selectedNodeId) {
       return;
     }
 
@@ -444,7 +498,11 @@ export function App() {
       timeoutId = window.setTimeout(() => {
         const timestamp = new Date().toISOString();
         const batchId = `resonance-${Date.now()}`;
-        const anchorDegree: DegreeHint = Math.random() > 0.55 ? "gong" : "zhi";
+        const selectedRegisterBand = registerBandMap.get(selectedNode.id) ?? 1;
+        const anchorDegree: DegreeHint =
+          Math.random() > 0.55
+            ? resolvePitchForBand(selectedRegisterBand, audioSettings.root, "root")
+            : resolvePitchForBand(selectedRegisterBand, audioSettings.root, "fifth");
 
         // Fire the local field as one breath so audio and collision visuals stay aligned.
         localNodes.forEach((node, index) => {
@@ -456,11 +514,14 @@ export function App() {
             batchId,
             timestamp,
             registerBandMap,
-            anchorDegree
+            anchorDegree,
+            audioSettings.root
           );
 
           appendEvent(event);
-          audio.trigger(event);
+          if (audioEnabled) {
+            audio?.trigger(event);
+          }
         });
 
         schedulePhrase();
@@ -472,7 +533,7 @@ export function App() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, nodes, selectedNodeId]);
+  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, audioSettings.root, nodes, selectedNodeId]);
 
   return <AppShell />;
 }

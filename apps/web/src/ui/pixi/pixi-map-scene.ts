@@ -9,6 +9,7 @@ type MapSceneLayer = {
   mapSprite: Sprite;
   mapCanvas: HTMLCanvasElement;
   mapContext: CanvasRenderingContext2D | null;
+  links: Graphics;
   ripples: Graphics;
   halos: Graphics;
   cores: Graphics;
@@ -26,6 +27,7 @@ export function createMapSceneLayer() {
       })
     })
   );
+  const links = new Graphics();
   const ripples = new Graphics();
   const halos = new Graphics();
   const cores = new Graphics();
@@ -44,13 +46,14 @@ export function createMapSceneLayer() {
   label.roundPixels = true;
   label.resolution = Math.min(window.devicePixelRatio || 1, 2);
 
-  root.addChild(mapSprite, ripples, halos, cores, label);
+  root.addChild(mapSprite, links, ripples, halos, cores, label);
 
   return {
     root,
     mapSprite,
     mapCanvas,
     mapContext,
+    links,
     ripples,
     halos,
     cores,
@@ -98,6 +101,23 @@ type MapNodeLayout = {
   y: number;
 };
 
+function getMapVerticalOffset(width: number, height: number) {
+  const base = Math.max(12, Math.min(48, Math.round(height * 0.06)));
+
+  if (width <= 480) {
+    return Math.max(10, base - 8);
+  }
+
+  if (width <= 767) {
+    return Math.max(12, base - 4);
+  }
+
+  if (width <= 1199) {
+    return base;
+  }
+
+  return Math.max(28, base);
+}
 const MAP_STACK_THRESHOLD_PX = 6;
 const MAP_STACK_BASE_RADIUS_PX = 8;
 const MAP_STACK_RING_STEP_PX = 7;
@@ -204,20 +224,51 @@ export function findMapNodeAtPoint(
   nodes: EchoNode[],
   context: RenderContext,
   clientX: number,
-  clientY: number
+  clientY: number,
+  options?: {
+    preferredNodeId?: string | null;
+    hitRadius?: number;
+    stickiness?: number;
+  }
 ) {
   const layout = buildMapNodeLayout(nodes, context);
+  const adjustedY = clientY - getMapVerticalOffset(context.width, context.height);
+  const hitRadius = options?.hitRadius ?? 16;
+  const stickiness = options?.stickiness ?? 6;
+  let nearestNode: EchoNode | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  let preferredDistance = Number.POSITIVE_INFINITY;
+  const preferredNodeId = options?.preferredNodeId ?? null;
 
   for (const node of nodes) {
     const position = layout.get(node.id);
     const x = position?.x ?? context.width / 2;
     const y = position?.y ?? context.height / 2;
-    if (Math.hypot(clientX - x, clientY - y) < 14) {
-      return node;
+    const distance = Math.hypot(clientX - x, adjustedY - y);
+
+    if (node.id === preferredNodeId) {
+      preferredDistance = distance;
+    }
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestNode = node;
     }
   }
 
-  return null;
+  if (!nearestNode || nearestDistance > hitRadius) {
+    return null;
+  }
+
+  if (
+    preferredNodeId &&
+    preferredDistance <= hitRadius + stickiness &&
+    preferredDistance <= nearestDistance + stickiness
+  ) {
+    return nodes.find((node) => node.id === preferredNodeId) ?? nearestNode;
+  }
+
+  return nearestNode;
 }
 
 type ActiveRipple = {
@@ -288,6 +339,7 @@ function applyMapFocusTransform(
   transitionPosition: MapNodeLayout | null,
   easedFocus: number
 ) {
+  const verticalOffset = getMapVerticalOffset(context.width, context.height);
   const focusDrift = transitionPosition
     ? {
         x: (context.width / 2 - transitionPosition.anchorX) * easedFocus * 0.34,
@@ -296,7 +348,10 @@ function applyMapFocusTransform(
     : { x: 0, y: 0 };
 
   layer.root.visible = true;
-  layer.root.position.set(context.width / 2 + focusDrift.x, context.height / 2 + focusDrift.y);
+  layer.root.position.set(
+    context.width / 2 + focusDrift.x,
+    context.height / 2 + focusDrift.y + verticalOffset
+  );
   layer.root.pivot.set(context.width / 2, context.height / 2);
   layer.root.scale.set(1 + easedFocus * 0.14);
 }
@@ -309,7 +364,25 @@ export function renderMapScene(
   getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
 ) {
   const { nodes, mapSearchTransition, recentEvents } = snapshot;
+  const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
   const mapNodeLayout = buildMapNodeLayout(nodes, context);
+  const hoveredNode =
+    !isCoarsePointer && hoverState.hoveredNodeId
+      ? nodes.find((node) => node.id === hoverState.hoveredNodeId) ?? null
+      : null;
+  const connectedNodeIds = new Set<string>();
+  if (hoveredNode) {
+    connectedNodeIds.add(hoveredNode.id);
+    nodes.forEach((candidate) => {
+      if (
+        candidate.id === hoveredNode.id ||
+        hoveredNode.peers.includes(candidate.id) ||
+        candidate.peers.includes(hoveredNode.id)
+      ) {
+        connectedNodeIds.add(candidate.id);
+      }
+    });
+  }
   const transitionNode = mapSearchTransition
     ? nodes.find((node) => node.id === mapSearchTransition.nodeId) ?? null
     : null;
@@ -323,9 +396,34 @@ export function renderMapScene(
   layer.mapSprite.alpha = 1;
 
   layer.ripples.clear();
+  layer.links.clear();
   layer.halos.clear();
   layer.cores.clear();
   layer.label.visible = false;
+
+  if (hoveredNode && !hasTransitionNode) {
+    const hoveredLayout = mapNodeLayout.get(hoveredNode.id);
+    if (hoveredLayout) {
+      connectedNodeIds.forEach((peerId) => {
+        if (peerId === hoveredNode.id) {
+          return;
+        }
+
+        const peerLayout = mapNodeLayout.get(peerId);
+        if (!peerLayout) {
+          return;
+        }
+
+        layer.links.moveTo(hoveredLayout.x, hoveredLayout.y);
+        layer.links.lineTo(peerLayout.x, peerLayout.y);
+        layer.links.stroke({
+          color: 0xffffff,
+          alpha: 0.3,
+          width: 1
+        });
+      });
+    }
+  }
 
   nodes.forEach((node, index) => {
     const layout = mapNodeLayout.get(node.id);
@@ -336,7 +434,13 @@ export function renderMapScene(
     const visibleRipples = getVisibleRipples(activeRipples, hasTransitionNode, isTransitionNode);
     const pulse = getPulse(visibleRipples, easedFocus, hasTransitionNode, isTransitionNode);
     const isHovered = hoverState.hoveredNodeId === node.id;
+    const isConnectedToHovered = connectedNodeIds.has(node.id);
+    const hasHoverContext = hoveredNode !== null && !hasTransitionNode;
     const halo = getHaloRadius(pulse, isHovered, isTransitionNode, easedFocus, context, index, hasTransitionNode);
+    const hoverHaloBoost = hasHoverContext ? (isHovered ? 2.8 : isConnectedToHovered ? 1.8 : -1.5) : 0;
+    const haloRadius = Math.max(4, halo + hoverHaloBoost);
+    const coreSizeBoost = hasHoverContext ? (isHovered ? 1.3 : isConnectedToHovered ? 0.7 : -0.6) : 0;
+    const coreRadius = (isHovered ? 4 : 3) + Math.min(2, pulse * 1.5) + coreSizeBoost;
 
     for (const ripple of visibleRipples) {
       const rippleRadius = 8 + ripple.progress * ripple.profile.radius;
@@ -353,23 +457,39 @@ export function renderMapScene(
       layer.ripples.stroke({ color: 0xffffff, alpha: 0.18 + easedFocus * 0.16, width: 1.8 });
     }
 
-    layer.halos.circle(x, y, halo);
+    layer.halos.circle(x, y, haloRadius);
     layer.halos.fill({
       color: 0xffffff,
       alpha: hasTransitionNode
         ? isTransitionNode
           ? 0.06 + pulse * 0.12
           : 0.02
-        : 0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0)
+        : hasHoverContext
+          ? isHovered
+            ? 0.12 + pulse * 0.16
+            : isConnectedToHovered
+              ? 0.07 + pulse * 0.11
+              : 0.015 + pulse * 0.04
+          : 0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0)
     });
 
-    layer.cores.circle(x, y, (isHovered ? 4 : 3) + Math.min(2, pulse * 1.5));
+    layer.cores.circle(x, y, Math.max(2.4, coreRadius));
     layer.cores.fill({
       color: 0xffffff,
-      alpha: hasTransitionNode ? (isTransitionNode ? 0.96 : 0.34) : 0.85
+      alpha: hasTransitionNode
+        ? isTransitionNode
+          ? 0.96
+          : 0.34
+        : hasHoverContext
+          ? isHovered
+            ? 0.98
+            : isConnectedToHovered
+              ? 0.76
+              : 0.24
+          : 0.85
     });
 
-    if (!hasTransitionNode && isHovered) {
+    if (!hasTransitionNode && isHovered && !isCoarsePointer) {
       layer.label.text = getDisplayNodeId(node);
       layer.label.x = x + halo + 6;
       layer.label.y = y - 6;

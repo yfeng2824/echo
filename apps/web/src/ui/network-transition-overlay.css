@@ -69,7 +69,7 @@
 
 .network-transition__eyebrow {
   margin: 0;
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.34em;
   text-transform: uppercase;
   opacity: 0.58;
@@ -82,6 +82,8 @@
   letter-spacing: 0.18em;
   text-transform: uppercase;
   line-height: 1.5;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .network-transition__layer--loading .network-transition__veil {
@@ -205,7 +207,7 @@
 
 @media (max-width: 900px) {
   .network-transition__eyebrow {
-    font-size: 9px;
+    font-size: 10px;
     letter-spacing: 0.28em;
   }
 

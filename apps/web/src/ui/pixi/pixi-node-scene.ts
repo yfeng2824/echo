@@ -1,5 +1,5 @@
 import { CanvasSource, Container, Graphics, Sprite, Texture } from "pixi.js";
-import type { EchoEvent, EchoNode } from "@echo/contracts";
+import type { EchoEvent } from "@echo/contracts";
 import type { CollisionBurst, RenderCallbacks, RenderContext, RenderSnapshot, VisualProfile } from "./pixi-types";
 import { getNodeEntryState } from "./pixi-transition-layer";
 

@@ -23,7 +23,6 @@ export function NodeInfoCard({ node, visible }: NodeInfoCardProps) {
     return null;
   }
 
-  const statusLabel = node.status === "live" ? "Live" : "Quiet";
   const fullNodeId = getFullNodeId(node);
   const displayNodeId = getDisplayNodeId(node);
 
@@ -77,10 +76,6 @@ export function NodeInfoCard({ node, visible }: NodeInfoCardProps) {
       <div className="scene__card-row">
         <span className="scene__card-label">Region</span>
         <span className="scene__card-value">{node.region}</span>
-      </div>
-      <div className="scene__card-row">
-        <span className="scene__card-label">State</span>
-        <span className="scene__card-value">● {statusLabel}</span>
       </div>
     </div>
   );

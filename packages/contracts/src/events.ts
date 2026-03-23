@@ -9,7 +9,10 @@ export type EchoEventType =
 
 export type RegisterBand = 1 | 2 | 3 | 4;
 
-export type DegreeHint = "gong" | "shang" | "jue" | "zhi" | "yu";
+type NoteName = "C" | "C#" | "D" | "D#" | "E" | "F" | "F#" | "G" | "G#" | "A" | "A#" | "B";
+type NoteOctave = 2 | 3 | 4 | 5 | 6;
+
+export type DegreeHint = `${NoteName}${NoteOctave}`;
 
 export type BatchRole = "lead" | "support" | "tail";
 
