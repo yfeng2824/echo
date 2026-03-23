@@ -7,9 +7,7 @@ import {
 } from "./node-id";
 
 export function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBand> {
-  const liveNodes = nodes
-    .filter((node) => node.status === "live")
-    .sort((left, right) => {
+  const liveNodes = [...nodes].sort((left, right) => {
       const degreeDelta = left.peers.length - right.peers.length;
       if (degreeDelta !== 0) {
         return degreeDelta;

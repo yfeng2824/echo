@@ -6,11 +6,14 @@ export type EchoNodeStatus = "live" | "quiet";
 
 export type AudioDensity = "sparse" | "balanced" | "rich";
 
-export type AudioTimbrePreset = "guqin";
+export type AudioTimbrePreset = "standard";
+
+export type AudioRoot = "C" | "C#" | "D" | "D#" | "E" | "F" | "F#" | "G" | "G#" | "A" | "A#" | "B";
 
 export type AudioSettings = {
   density: AudioDensity;
   timbrePreset: AudioTimbrePreset;
+  root: AudioRoot;
 };
 
 export type EchoNode = {

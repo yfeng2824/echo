@@ -59,8 +59,9 @@ type AppState = {
 };
 
 const defaultAudioSettings: AudioSettings = {
-  density: "sparse",
-  timbrePreset: "guqin"
+  density: "balanced",
+  timbrePreset: "standard",
+  root: "C"
 };
 
 const defaultHeadlineCounts: HeadlineCounts = {
@@ -77,10 +78,54 @@ function getInitialNetwork(): EchoNetwork {
   return saved === "mainnet" || saved === "testnet" ? saved : "testnet";
 }
 
+function getInitialAudioSettings(): AudioSettings {
+  if (typeof window === "undefined") {
+    return defaultAudioSettings;
+  }
+
+  const savedDensity = window.localStorage.getItem("echo-audio-density");
+  const savedRoot = window.localStorage.getItem("echo-audio-root");
+
+  const density =
+    savedDensity === "sparse" || savedDensity === "balanced" || savedDensity === "rich"
+      ? savedDensity
+      : defaultAudioSettings.density;
+  const root =
+    savedRoot === "C" ||
+    savedRoot === "C#" ||
+    savedRoot === "D" ||
+    savedRoot === "D#" ||
+    savedRoot === "E" ||
+    savedRoot === "F" ||
+    savedRoot === "F#" ||
+    savedRoot === "G" ||
+    savedRoot === "G#" ||
+    savedRoot === "A" ||
+    savedRoot === "A#" ||
+    savedRoot === "B"
+      ? savedRoot
+      : defaultAudioSettings.root;
+
+  return {
+    ...defaultAudioSettings,
+    density,
+    root
+  };
+}
+
 function persistNetwork(network: EchoNetwork) {
   if (typeof window !== "undefined") {
     window.localStorage.setItem("echo-network", network);
   }
+}
+
+function persistAudioSettings(audioSettings: AudioSettings) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  window.localStorage.setItem("echo-audio-density", audioSettings.density);
+  window.localStorage.setItem("echo-audio-root", audioSettings.root);
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -92,8 +137,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedNodeId: null,
   nodeSceneEnteredAt: null,
   mapSearchTransition: null,
-  audioEnabled: false,
-  audioSettings: defaultAudioSettings,
+  audioEnabled: true,
+  audioSettings: getInitialAudioSettings(),
   nodes: [],
   channels: [],
   recentEvents: [],
@@ -168,12 +213,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ activeScene: "map", nodeSceneEnteredAt: null, mapSearchTransition: null });
   },
   setAudioSettings: (nextSettings) => {
-    set((state) => ({
-      audioSettings: {
+    set((state) => {
+      const audioSettings = {
         ...state.audioSettings,
         ...nextSettings
-      }
-    }));
+      };
+      persistAudioSettings(audioSettings);
+      return { audioSettings };
+    });
   },
   toggleAudio: () => {
     const nextEnabled = !get().audioEnabled;

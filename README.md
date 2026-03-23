@@ -8,32 +8,17 @@ Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-s
 - Zustand
 - Shared contracts package in `packages/contracts`
 - Pixi-based renderer with a `d3-geo` world-map foundation
-- Custom Web Audio guqin-inspired system
+- Custom Web Audio pentatonic system
 - Fastify adapter service in `apps/api`
 
 ## Current Features
 
-- Full-screen world map as the default view
-- Hash-based scene routing with `#node` for the focused node view
-- Clickable nodes on the map
-- Search by node ID
-- Empty state overlay for unmatched search
-- Mainnet/testnet switching from the scene chrome
-- Real-data bootstrap through the adapter service
-- Polled recent-event feed layered on top of the bootstrap snapshot
-- Atmospheric projected world map with a restrained black-and-white treatment
-- Node-to-local-view transition carries the selected node into the focused scene
-- Network transition overlay during source/network swaps
-- No-live-data overlay with retry when dashboard activity is unavailable
-- Minimal map overlay with a search field only
-- Right-side node details only in the node view
-- Minimal black-and-white controls for sound, density, and network selection
-- Map ambient bed with distributed node-trigger pulses and ripples
-- Selected-node local resonance behavior with a centered main node and scattered direct peers
-- Thin connection lines between the selected node and direct peers
-- Collision echoes in the node scene with secondary rings and capped recursion via `rippleLayer`
-- Visible node IDs rendered as derived truncated hexadecimal values while internal graph IDs stay unchanged
-- Copy-to-clipboard action for node IDs with overlay feedback
+- Dual-scene experience: a world map overview and a focused node resonance scene.
+- Searchable node navigation with direct transition into node context.
+- Interactive control surface for network selection, sound muting, and tonal shaping.
+- Responsive controls that adapt between desktop and compact mobile flows.
+- Adapter-backed live bootstrap plus polled event updates from the API layer.
+- Atmospheric black-and-white visual rendering paired with pentatonic audio feedback.
 
 ## Project Structure
 
@@ -64,6 +49,7 @@ The default `dev` script starts the web workspace. Run `npm run dev:api` alongsi
 - The adapter exposes `GET /health`, `GET /bootstrap`, and `GET /events` from the Fastify service in `apps/api`.
 - The adapter uses the dashboard API as the single live-data source for both networks.
 - The web app talks to the local adapter instead of calling Fiber/dashboard upstreams directly.
+- The web app persists network, density, and root selections in local storage.
 
 ## Configuration
 
@@ -74,7 +60,9 @@ The default `dev` script starts the web workspace. Run `npm run dev:api` alongsi
 ## Demo Notes
 
 - Rendering uses Pixi, with `d3-geo` providing the projection-based world map.
-- The sonic system stays fixed to a guqin-inspired pentatonic design.
+- The sonic system uses a pentatonic design with selectable root (default `C`).
+- Sound defaults on with a short startup mute gate; muting disables audio while keeping visual motion active.
+- Search supports quick keyboard focus via `/`, and sound toggles via `M`.
 - Search is wired to direct node lookup and an empty-state overlay for unmatched IDs.
 - The node scene reseeds peer layout on entry so repeated visits feel different.
 - Collision-generated echo rings are capped to prevent noisy feedback loops.

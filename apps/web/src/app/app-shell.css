@@ -1,7 +1,65 @@
 .app-shell {
+  --chrome-top: 40px;
+  --chrome-side: 40px;
+  --chrome-gap: 16px;
+  --chrome-control-height: 32px;
+  --chrome-search-width: 280px;
+  --chrome-meta-slot-width: 260px;
+  --chrome-z: 20;
+  --scene-panel-z: 11;
+  --overlay-z: 30;
+  --density-bottom-offset: 40px;
+  --node-card-top-offset: 196px;
+  --node-card-width: 280px;
+  --node-sheet-height: min(42vh, 320px);
+  --node-sheet-inset: 12px;
+  --node-sheet-bottom-gap: 72px;
+  --map-y-offset: 48px;
   position: relative;
   min-height: 100vh;
   background: #000;
   color: #fff;
   overflow: hidden;
+}
+
+@media (max-width: 1199px) {
+  .app-shell {
+    --chrome-side: 24px;
+    --chrome-top: 24px;
+    --chrome-search-width: 280px;
+    --chrome-meta-slot-width: 230px;
+    --density-bottom-offset: 24px;
+    --node-card-top-offset: 188px;
+    --node-card-width: 280px;
+    --map-y-offset: 40px;
+  }
+}
+
+@media (max-width: 767px) {
+  .app-shell {
+    --chrome-side: 12px;
+    --chrome-top: 12px;
+    --chrome-gap: 12px;
+    --chrome-control-height: 34px;
+    --chrome-search-width: calc(100vw - (var(--chrome-side) * 2));
+    --chrome-meta-slot-width: min(230px, calc(100vw - 120px));
+    --density-bottom-offset: calc(12px + env(safe-area-inset-bottom));
+    --node-card-width: calc(100vw - (var(--node-sheet-inset) * 2));
+    --node-sheet-height: min(48vh, 360px);
+    --node-sheet-bottom-gap: calc(76px + env(safe-area-inset-bottom));
+    --map-y-offset: 28px;
+  }
+}
+
+@media (max-width: 480px) {
+  .app-shell {
+    --chrome-side: 8px;
+    --chrome-top: 8px;
+    --chrome-gap: 10px;
+    --chrome-control-height: 32px;
+    --chrome-meta-slot-width: min(208px, calc(100vw - 104px));
+    --density-bottom-offset: calc(8px + env(safe-area-inset-bottom));
+    --node-sheet-bottom-gap: calc(72px + env(safe-area-inset-bottom));
+    --map-y-offset: 22px;
+  }
 }

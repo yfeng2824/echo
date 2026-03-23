@@ -35,6 +35,7 @@ export class PixiSurface {
   private height = window.innerHeight;
   private dpr = Math.min(window.devicePixelRatio || 1, 2);
   private projection: WorldMapProjection = createWorldMapProjection(this.width, this.height);
+  private resizeObserver: ResizeObserver | null = null;
   private destroyed = false;
   private initialized = false;
   private handlePointerMove: ((event: PointerEvent) => void) | null = null;
@@ -67,7 +68,7 @@ export class PixiSurface {
     this.app.canvas.className = "render-surface";
     this.root.addChild(this.mapLayer.root, this.nodeLayer.root);
     this.app.stage.addChild(this.root);
-    this.resize();
+    this.syncViewportSize();
     this.bindPointerEvents();
     this.app.ticker.add(this.render);
   }
@@ -109,14 +110,19 @@ export class PixiSurface {
     if (this.handleClick) {
       this.app.canvas.removeEventListener("click", this.handleClick);
     }
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = null;
     window.removeEventListener("resize", this.resize);
+    window.visualViewport?.removeEventListener("resize", this.resize);
+    window.visualViewport?.removeEventListener("scroll", this.resize);
     this.app.ticker.remove(this.render);
     this.app.destroy(true, { children: true });
   }
 
-  private resize = () => {
-    const nextWidth = window.innerWidth;
-    const nextHeight = window.innerHeight;
+  private syncViewportSize = () => {
+    const rect = this.options.root.getBoundingClientRect();
+    const nextWidth = Math.max(1, Math.round(rect.width));
+    const nextHeight = Math.max(1, Math.round(rect.height));
     const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
 
     if (nextWidth === this.width && nextHeight === this.height && nextDpr === this.dpr) {
@@ -126,7 +132,15 @@ export class PixiSurface {
     this.width = nextWidth;
     this.height = nextHeight;
     this.dpr = nextDpr;
+    if (this.initialized) {
+      this.app.renderer.resize(nextWidth, nextHeight);
+      this.app.renderer.resolution = nextDpr;
+    }
     this.projection = createWorldMapProjection(this.width, this.height);
+  };
+
+  private resize = () => {
+    this.syncViewportSize();
   };
 
   private bindPointerEvents() {
@@ -148,7 +162,12 @@ export class PixiSurface {
           projection: this.projection
         },
         event.clientX,
-        event.clientY
+        event.clientY,
+        {
+          preferredNodeId: this.hoveredNodeId,
+          hitRadius: 16,
+          stickiness: 8
+        }
       );
 
       this.hoveredNodeId = node?.id ?? null;
@@ -171,7 +190,10 @@ export class PixiSurface {
           projection: this.projection
         },
         event.clientX,
-        event.clientY
+        event.clientY,
+        {
+          hitRadius: 18
+        }
       );
 
       if (node) {
@@ -182,12 +204,21 @@ export class PixiSurface {
     this.app.canvas.addEventListener("pointermove", this.handlePointerMove);
     this.app.canvas.addEventListener("click", this.handleClick);
     window.addEventListener("resize", this.resize);
+    window.visualViewport?.addEventListener("resize", this.resize);
+    window.visualViewport?.addEventListener("scroll", this.resize);
+    this.resizeObserver = new ResizeObserver(() => {
+      this.syncViewportSize();
+    });
+    this.resizeObserver.observe(this.options.root);
   }
 
   private readonly render = () => {
     if (this.destroyed) {
       return;
     }
+
+    // Keep projection synced even when layout changes without a window resize event.
+    this.syncViewportSize();
 
     const context = {
       now: Date.now(),
@@ -225,7 +256,6 @@ export class PixiSurface {
             nodeId:
               leftRipple.intensity >= rightRipple.intensity ? leftRipple.nodeId : rightRipple.nodeId,
             intensity: 0.14,
-            degreeHint: "yu",
             batchRole: "tail",
             source: "resonance",
             rippleLayer: Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1

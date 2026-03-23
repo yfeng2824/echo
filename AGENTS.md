@@ -23,8 +23,8 @@
 ## Data And Audio Rules
 - Use derived truncated hex IDs for visible node labels; do not change internal graph IDs.
 - Keep collision echoes capped with the `rippleLayer` recursion limit.
-- Keep audio opt-in.
-- Preserve the guqin-inspired pentatonic system unless the task explicitly changes it.
+- Keep audio default-on with a short startup mute gate; when sound is toggled off, mute audio only and preserve visual motion.
+- Preserve the pentatonic system with user-selectable root (default `C`) unless the task explicitly changes it.
 
 ## Code Style
 - Remove unnecessary complexity before adding new structure.
