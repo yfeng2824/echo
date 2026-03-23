@@ -33,6 +33,7 @@ export function SceneChrome() {
   const audioEnabled = useAppStore((state) => state.audioEnabled);
   const audioSettings = useAppStore((state) => state.audioSettings);
   const currentNetwork = useAppStore((state) => state.currentNetwork);
+  const invalidNodeRouteId = useAppStore((state) => state.invalidNodeRouteId);
   const networkStatus = useAppStore((state) => state.networkStatus);
   const networkTransitionVisible = useAppStore((state) => state.networkTransitionVisible);
   const headlineCounts = useAppStore((state) => state.headlineCounts);
@@ -40,6 +41,7 @@ export function SceneChrome() {
   const nodes = useAppStore((state) => state.nodes);
   const setAudioSettings = useAppStore((state) => state.setAudioSettings);
   const setNetwork = useAppStore((state) => state.setNetwork);
+  const setInvalidNodeRouteId = useAppStore((state) => state.setInvalidNodeRouteId);
   const selectNode = useAppStore((state) => state.selectNode);
   const startMapSearchTransition = useAppStore((state) => state.startMapSearchTransition);
   const clearMapSearchTransition = useAppStore((state) => state.clearMapSearchTransition);
@@ -94,6 +96,21 @@ export function SceneChrome() {
     }
   }, []);
 
+  const resetSearchUi = useCallback(
+    (nextQuery = "") => {
+      setQuery(nextQuery);
+      setSearchState("idle");
+      setEmptyOverlayState("idle");
+      clearMapSearchTransition();
+    },
+    [clearMapSearchTransition]
+  );
+
+  const handleInvalidRouteBack = useCallback(() => {
+    setInvalidNodeRouteId(null);
+    goToMap();
+  }, [goToMap, setInvalidNodeRouteId]);
+
   useEffect(() => {
     return () => {
       cancelSearchTimers();
@@ -108,12 +125,9 @@ export function SceneChrome() {
     previousSceneRef.current = activeScene;
 
     if (previousScene === "node" && activeScene === "map") {
-      setQuery("");
-      setSearchState("idle");
-      setEmptyOverlayState("idle");
-      clearMapSearchTransition();
+      resetSearchUi();
     }
-  }, [activeScene, clearMapSearchTransition]);
+  }, [activeScene, resetSearchUi]);
 
   useEffect(() => {
     const previousNetwork = previousNetworkRef.current;
@@ -125,11 +139,8 @@ export function SceneChrome() {
     }
 
     cancelSearchTimers();
-    setQuery("");
-    setSearchState("idle");
-    setEmptyOverlayState("idle");
-    clearMapSearchTransition();
-  }, [activeScene, cancelSearchTimers, clearMapSearchTransition, currentNetwork]);
+    resetSearchUi();
+  }, [activeScene, cancelSearchTimers, currentNetwork, resetSearchUi]);
 
   useEffect(() => {
     const handleSlashShortcut = (event: KeyboardEvent) => {
@@ -291,13 +302,15 @@ export function SceneChrome() {
 
     cancelSearchTimers();
 
-    if (!query.trim()) {
+    const normalizedQuery = query.trim();
+
+    if (!normalizedQuery) {
       setSearchState("idle");
       clearMapSearchTransition();
       return;
     }
 
-    const matchedNode = findNodeByQuery(nodes, query);
+    const matchedNode = findNodeByQuery(nodes, normalizedQuery);
 
     setSearchState("loading");
 
@@ -333,6 +346,7 @@ export function SceneChrome() {
       }
 
       clearMapSearchTransition();
+      setQuery("");
       setSearchState("empty");
       setEmptyOverlayState("visible");
     }, 520);
@@ -349,10 +363,7 @@ export function SceneChrome() {
 
   const handleClearQuery = () => {
     cancelSearchTimers();
-    setQuery("");
-    setSearchState("idle");
-    setEmptyOverlayState("idle");
-    clearMapSearchTransition();
+    resetSearchUi();
   };
 
   const handleDismissEmptyState = () => {
@@ -370,21 +381,30 @@ export function SceneChrome() {
     }, 760);
   };
 
-  const overlayContent: OverlayContent | null = isLiveDataUnavailable
-    ? {
-        title: "No live echo detected",
-        description: "Live network activity is not available right now.",
-        buttonLabel: "Retry",
-        buttonAction: () => window.location.reload()
-      }
-    : searchState === "empty"
-      ? {
-          title: "No echo found",
-          description: "We couldn't find a matching node in the current network.",
-          buttonLabel: "Back to map",
-          buttonAction: handleDismissEmptyState
-        }
-      : null;
+  let overlayContent: OverlayContent | null = null;
+
+  if (isLiveDataUnavailable) {
+    overlayContent = {
+      title: "No live echo detected",
+      description: "Live network activity is not available right now.",
+      buttonLabel: "Retry",
+      buttonAction: () => window.location.reload()
+    };
+  } else if (invalidNodeRouteId) {
+    overlayContent = {
+      title: "Node not found",
+      description: "This node link doesn't exist in the current network.",
+      buttonLabel: "Back",
+      buttonAction: handleInvalidRouteBack
+    };
+  } else if (searchState === "empty") {
+    overlayContent = {
+      title: "No echo found",
+      description: "We couldn't find a matching node in the current network.",
+      buttonLabel: "Back",
+      buttonAction: handleDismissEmptyState
+    };
+  }
 
   return (
     <>

@@ -33,6 +33,7 @@ type AppState = {
   networkStatus: NetworkStatus;
   networkError: string | null;
   networkTransitionVisible: boolean;
+  invalidNodeRouteId: string | null;
   selectedNodeId: string | null;
   nodeSceneEnteredAt: number | null;
   mapSearchTransition: MapSearchTransition | null;
@@ -49,6 +50,7 @@ type AppState = {
   setNetwork: (network: EchoNetwork) => void;
   setNetworkState: (status: AppState["networkStatus"], error?: string | null) => void;
   setNetworkTransitionVisible: (visible: boolean) => void;
+  setInvalidNodeRouteId: (nodeId: string | null) => void;
   setScene: (scene: SceneId) => void;
   selectNode: (nodeId: string) => void;
   startMapSearchTransition: (nodeId: string) => void;
@@ -134,6 +136,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   networkStatus: "loading",
   networkError: null,
   networkTransitionVisible: false,
+  invalidNodeRouteId: null,
   selectedNodeId: null,
   nodeSceneEnteredAt: null,
   mapSearchTransition: null,
@@ -153,7 +156,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       channels,
       recentEvents,
       headlineCounts,
-      selectedNodeId: nodes[0]?.id ?? null
+      selectedNodeId: nodes[0]?.id ?? null,
+      invalidNodeRouteId: null
     });
   },
   appendEvent: (event) => {
@@ -173,6 +177,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: null,
       nodeSceneEnteredAt: null,
       mapSearchTransition: null,
+      invalidNodeRouteId: null,
       networkStatus: "loading",
       networkError: null
     });
@@ -186,16 +191,20 @@ export const useAppStore = create<AppState>((set, get) => ({
   setNetworkTransitionVisible: (visible) => {
     set({ networkTransitionVisible: visible });
   },
+  setInvalidNodeRouteId: (nodeId) => {
+    set({ invalidNodeRouteId: nodeId });
+  },
   setScene: (scene) => {
     set({ activeScene: scene });
   },
   selectNode: (nodeId) => {
-    set({
+    set((state) => ({
       selectedNodeId: nodeId,
       activeScene: "node",
-      nodeSceneEnteredAt: Date.now(),
-      mapSearchTransition: null
-    });
+      nodeSceneEnteredAt: state.activeScene === "node" ? state.nodeSceneEnteredAt : Date.now(),
+      mapSearchTransition: null,
+      invalidNodeRouteId: null
+    }));
   },
   startMapSearchTransition: (nodeId) => {
     set({
@@ -210,7 +219,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ mapSearchTransition: null });
   },
   goToMap: () => {
-    set({ activeScene: "map", nodeSceneEnteredAt: null, mapSearchTransition: null });
+    set({
+      activeScene: "map",
+      nodeSceneEnteredAt: null,
+      mapSearchTransition: null,
+      invalidNodeRouteId: null
+    });
   },
   setAudioSettings: (nextSettings) => {
     set((state) => {

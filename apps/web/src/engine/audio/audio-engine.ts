@@ -49,25 +49,25 @@ const CHORD_PRIORITY_INTERVALS_BY_BAND: Record<RegisterBand, Record<number, numb
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 2, 7, 9]
+    4: [0, 4, 7, 9]
   },
   2: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 2, 7, 9]
+    4: [0, 4, 7, 9]
   },
   3: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 2, 7, 9]
+    4: [0, 4, 7, 9]
   },
   4: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 2, 7, 9]
+    4: [0, 4, 7, 9]
   }
 };
 
@@ -85,6 +85,20 @@ const ROOT_SEMITONE: Record<AudioRoot, number> = {
   "A#": 10,
   B: 11
 };
+
+const COLLISION_INTENSITY_THRESHOLD = 0.2;
+
+function isCollisionLikeResonanceEvent(event: EchoEvent) {
+  const source = event.source ?? "network";
+  const batchRole = event.batchRole ?? "support";
+
+  return (
+    source === "resonance" &&
+    batchRole === "tail" &&
+    (event.rippleLayer ?? 0) > 0 &&
+    event.intensity <= COLLISION_INTENSITY_THRESHOLD
+  );
+}
 
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
@@ -368,9 +382,10 @@ export function createAudioEngine(): AudioEngine {
     const now = context.currentTime;
     const source = event.source ?? "network";
     const batchRole = event.batchRole ?? "support";
+    const isCollisionLike = isCollisionLikeResonanceEvent(event);
     const strength = event.intensity + (batchRole === "lead" ? 0.2 : 0);
 
-    if (!allocateTransientSlot(source, batchRole, strength)) {
+    if (!isCollisionLike && !allocateTransientSlot(source, batchRole, strength)) {
       return;
     }
 
@@ -386,12 +401,13 @@ export function createAudioEngine(): AudioEngine {
     const bodyGain = context.createGain();
     const airGain = context.createGain();
     const attack = 0.008;
-    const bodyDuration = source === "resonance" ? 0.48 : 0.32;
-    const tailDuration = source === "resonance" ? 2.6 : source === "ambient" ? 1.7 : 2.1;
-    const maxGain =
+    const bodyDuration = isCollisionLike ? 0.18 : source === "resonance" ? 0.48 : 0.32;
+    const tailDuration = isCollisionLike ? 0.75 : source === "resonance" ? 2.6 : source === "ambient" ? 1.7 : 2.1;
+    const baseGain =
       (source === "resonance" ? 0.06 : 0.045) *
       (batchRole === "lead" ? 1.15 : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
+    const maxGain = baseGain * (isCollisionLike ? 0.62 : 1);
 
     // Blend a short pluck, a resonant body, and a faint airy tail for the default voice.
     const data = airBuffer.getChannelData(0);
@@ -399,36 +415,42 @@ export function createAudioEngine(): AudioEngine {
       data[index] = (Math.random() * 2 - 1) * 0.16;
     }
 
-    pluckOscillator.type = "triangle";
-    pluckOscillator.frequency.setValueAtTime(frequency * 2, now);
+    pluckOscillator.type = isCollisionLike ? "sine" : "triangle";
+    pluckOscillator.frequency.setValueAtTime(frequency * (isCollisionLike ? 1.5 : 2), now);
 
     bodyOscillator.type = "sine";
     bodyOscillator.frequency.setValueAtTime(frequency, now);
-    bodyOscillator.detune.setValueAtTime(batchRole === "tail" ? -2 : 2, now);
+    bodyOscillator.detune.setValueAtTime(isCollisionLike ? -7 : batchRole === "tail" ? -2 : 2, now);
 
     pluckFilter.type = "bandpass";
-    pluckFilter.frequency.setValueAtTime(Math.min(2600, frequency * 3.5), now);
-    pluckFilter.Q.setValueAtTime(1.2, now);
+    pluckFilter.frequency.setValueAtTime(
+      Math.min(isCollisionLike ? 1500 : 2600, frequency * (isCollisionLike ? 2.1 : 3.5)),
+      now
+    );
+    pluckFilter.Q.setValueAtTime(isCollisionLike ? 0.9 : 1.2, now);
 
     bodyFilter.type = "lowpass";
-    bodyFilter.frequency.setValueAtTime(700 + event.intensity * 550, now);
-    bodyFilter.Q.setValueAtTime(0.9, now);
+    bodyFilter.frequency.setValueAtTime(
+      isCollisionLike ? 420 + event.intensity * 280 : 700 + event.intensity * 550,
+      now
+    );
+    bodyFilter.Q.setValueAtTime(isCollisionLike ? 0.62 : 0.9, now);
 
     airFilter.type = "highpass";
-    airFilter.frequency.setValueAtTime(1800, now);
-    airFilter.Q.setValueAtTime(0.7, now);
+    airFilter.frequency.setValueAtTime(isCollisionLike ? 2200 : 1800, now);
+    airFilter.Q.setValueAtTime(isCollisionLike ? 0.5 : 0.7, now);
 
     pluckGain.gain.setValueAtTime(0.0001, now);
-    pluckGain.gain.linearRampToValueAtTime(maxGain * 0.62, now + attack);
-    pluckGain.gain.exponentialRampToValueAtTime(0.0001, now + 0.16);
+    pluckGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.45 : 0.62), now + attack);
+    pluckGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? 0.09 : 0.16));
 
     bodyGain.gain.setValueAtTime(0.0001, now);
-    bodyGain.gain.linearRampToValueAtTime(maxGain, now + 0.03);
+    bodyGain.gain.linearRampToValueAtTime(maxGain, now + (isCollisionLike ? 0.015 : 0.03));
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + bodyDuration + tailDuration);
 
     airGain.gain.setValueAtTime(0.0001, now);
-    airGain.gain.linearRampToValueAtTime(maxGain * 0.08, now + 0.06);
-    airGain.gain.exponentialRampToValueAtTime(0.0001, now + tailDuration);
+    airGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.03 : 0.08), now + 0.06);
+    airGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? tailDuration * 0.7 : tailDuration));
 
     pluckOscillator.connect(pluckFilter);
     pluckFilter.connect(pluckGain);

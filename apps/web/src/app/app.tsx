@@ -42,7 +42,7 @@ const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
   4: ["root", "second", "fifth", "sixth"]
 };
 
-const RESONANCE_PEER_DEGREES: ScaleDegreeKey[] = ["second", "third", "sixth", "fifth"];
+const RESONANCE_PEER_DEGREES: ScaleDegreeKey[] = ["third", "fifth", "sixth", "third"];
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
 const STARTUP_AUDIO_MUTE_MS = 1000;
 
