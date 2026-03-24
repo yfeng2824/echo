@@ -9,9 +9,9 @@ export const REFRESH_INTERVAL_MS = Number(process.env.FIBER_REFRESH_INTERVAL_MS 
 
 const DEFAULT_PAGE_SIZE = 500;
 const MAX_DASHBOARD_PAGES = 50;
-const MAX_BOOTSTRAP_EVENTS = 16;
+export const MAX_PRESENTATION_EVENTS = 16;
 const MAX_BOOTSTRAP_EVENT_WINDOW = 24;
-const MAX_STORE_EVENTS = 80;
+const MAX_STORE_EVENTS = 400;
 
 function hashString(value) {
   let hash = 0;
@@ -30,6 +30,88 @@ function seededRandom(seed) {
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
+}
+
+function getEventTypePriority(type) {
+  switch (type) {
+    case "channel_opened":
+      return 0.24;
+    case "payment_routed":
+      return 0.18;
+    case "channel_updated":
+      return 0.12;
+    case "path_used":
+      return 0.08;
+    case "region_activity_burst":
+      return 0.14;
+    case "node_seen":
+      return 0.06;
+    default:
+      return 0;
+  }
+}
+
+function scoreEvent(event, latestTimeMs) {
+  const eventTimeMs = toTimeMs(event.at);
+  const recencyWindowMs = 30 * 60 * 1000;
+  const recencyScore = clamp(1 - Math.max(0, latestTimeMs - eventTimeMs) / recencyWindowMs, 0, 1) * 0.22;
+  return event.intensity + getEventTypePriority(event.type) + recencyScore;
+}
+
+export function selectPresentationEvents(events, limit) {
+  if (events.length <= limit) {
+    return [...events].sort((left, right) => toTimeMs(right.at) - toTimeMs(left.at));
+  }
+
+  const latestTimeMs = events.reduce((latest, event) => Math.max(latest, toTimeMs(event.at)), 0);
+  const scoredEvents = events
+    .map((event, index) => ({
+      event,
+      index,
+      score: scoreEvent(event, latestTimeMs)
+    }))
+    .sort((left, right) => {
+      const scoreDelta = right.score - left.score;
+      if (Math.abs(scoreDelta) > 0.0001) {
+        return scoreDelta;
+      }
+
+      return toTimeMs(right.event.at) - toTimeMs(left.event.at);
+    });
+
+  const selected = [];
+  const seenChannels = new Set();
+
+  for (const entry of scoredEvents) {
+    if (selected.length >= limit) {
+      break;
+    }
+
+    if (entry.event.channelId && seenChannels.has(entry.event.channelId)) {
+      continue;
+    }
+
+    selected.push(entry.event);
+    if (entry.event.channelId) {
+      seenChannels.add(entry.event.channelId);
+    }
+  }
+
+  if (selected.length < limit) {
+    for (const entry of scoredEvents) {
+      if (selected.length >= limit) {
+        break;
+      }
+
+      if (selected.includes(entry.event)) {
+        continue;
+      }
+
+      selected.push(entry.event);
+    }
+  }
+
+  return selected.sort((left, right) => toTimeMs(right.at) - toTimeMs(left.at));
 }
 
 function normalizeLongitude(value) {
@@ -281,14 +363,13 @@ function buildBootstrapFromMaps(nodeMap, rawChannelMap, headlineCounts) {
 
   const recentEvents = [...rawChannels]
     .sort((left, right) => toTimeMs(right.lastActiveAt) - toTimeMs(left.lastActiveAt))
-    .slice(0, MAX_BOOTSTRAP_EVENTS)
     .map(buildBootstrapEvent);
 
   return {
     bootstrap: {
       nodes,
       channels,
-      recentEvents,
+      recentEvents: selectPresentationEvents(recentEvents, MAX_PRESENTATION_EVENTS),
       headlineCounts:
         headlineCounts ?? {
           activeNodeCount: nodes.filter((node) => node.status === "live").length,
@@ -436,7 +517,7 @@ function buildDeltaEvents(previousChannels, nextChannels) {
     }
   });
 
-  return events.slice(0, MAX_BOOTSTRAP_EVENTS);
+  return events;
 }
 
 export function createAdapterStore() {
@@ -458,10 +539,11 @@ export async function refreshAdapterStore(store, sources) {
   const source = sources[0];
   const nextSnapshot = await fetchDashboardBootstrap(source);
   const deltaEvents = store.rawChannels.size > 0 ? buildDeltaEvents(store.rawChannels, nextSnapshot.rawChannels) : [];
+  const mergedBootstrapEvents = [...deltaEvents, ...nextSnapshot.bootstrap.recentEvents];
 
   store.bootstrap = {
     ...nextSnapshot.bootstrap,
-    recentEvents: [...deltaEvents, ...nextSnapshot.bootstrap.recentEvents].slice(0, MAX_BOOTSTRAP_EVENT_WINDOW)
+    recentEvents: selectPresentationEvents(mergedBootstrapEvents, MAX_BOOTSTRAP_EVENT_WINDOW)
   };
   store.rawChannels = nextSnapshot.rawChannels;
   store.recentEvents = [...deltaEvents, ...store.recentEvents].slice(0, MAX_STORE_EVENTS);

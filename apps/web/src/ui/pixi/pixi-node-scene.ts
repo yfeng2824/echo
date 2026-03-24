@@ -3,6 +3,7 @@ import type { EchoEvent, EchoNode } from "@echo/contracts";
 import type { CollisionBurst, RenderCallbacks, RenderContext, RenderSnapshot, VisualProfile } from "./pixi-types";
 import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer";
 import { getDisplayNodeId } from "../../lib/node-id";
+import { getNodeViewPeerOrbits } from "../../lib/node-view-layout";
 
 type NodeSceneLayer = {
   root: Container;
@@ -101,21 +102,6 @@ function updateMapTexture(layer: NodeSceneLayer, context: RenderContext) {
   layer.mapSprite.height = context.height;
 }
 
-function hashString(value: string) {
-  let hash = 0;
-
-  for (const char of value) {
-    hash = (hash * 31 + char.charCodeAt(0)) % 100000;
-  }
-
-  return hash;
-}
-
-function seededRandom(seed: number) {
-  const value = Math.sin(seed) * 10000;
-  return value - Math.floor(value);
-}
-
 function getNodeEvents(events: EchoEvent[], nodeId: string) {
   return events.filter((event) => event.nodeId === nodeId);
 }
@@ -153,15 +139,10 @@ function buildNodeLayout(
   });
 
   const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
+  const peerOrbits = getNodeViewPeerOrbits(selectedNode, peers, localLayoutSeed);
 
-  peers.forEach((peer, index) => {
-    const hash = hashString(peer.id);
-    const seedBase = localLayoutSeed + hash * 0.37 + index * 13.1;
-    const angleJitter = (seededRandom(seedBase) - 0.5) * 0.7;
-    const radialJitter = 0.82 + seededRandom(seedBase + 11.3) * 0.38;
-    const orbitBias = (seededRandom(seedBase + 23.7) - 0.5) * 26;
-    const angle = (index / Math.max(peers.length, 1)) * Math.PI * 2 + angleJitter + orbitBias * 0.01;
-    const radius = baseRadius * radialJitter;
+  peerOrbits.forEach(({ node: peer, angle, orbitDistance }) => {
+    const radius = baseRadius * orbitDistance;
     const x = Math.round(anchorX + Math.cos(angle) * radius * peerEntryEase);
     const y = Math.round(anchorY + Math.sin(angle) * radius * peerEntryEase);
 
@@ -175,7 +156,7 @@ function buildNodeLayout(
 
   return {
     selectedNode,
-    peers,
+    peers: peerOrbits.map((entry) => entry.node),
     layout,
     anchorX,
     anchorY

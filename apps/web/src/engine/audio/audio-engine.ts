@@ -4,6 +4,7 @@ import type {
   AudioSettings,
   DegreeHint,
   EchoEvent,
+  EchoEventType,
   EchoNode,
   RegisterBand,
   SceneId
@@ -17,6 +18,16 @@ type ActiveTransientVoice = {
   strength: number;
   releaseAt: number;
   stop: () => void;
+};
+
+type MelodyStepSpec = {
+  delayMs: number;
+  interval: number;
+};
+
+type MelodySpec = {
+  baseOctave: number;
+  steps: MelodyStepSpec[];
 };
 
 const WEIGHTED_INTERVALS: Record<RegisterBand, Array<{ interval: number; weight: number }>> = {
@@ -87,6 +98,64 @@ const ROOT_SEMITONE: Record<AudioRoot, number> = {
 };
 
 const COLLISION_INTENSITY_THRESHOLD = 0.2;
+const COLLISION_VOICING_INTERVALS = [12, 19, 24, 19] as const;
+const NETWORK_MELODY_PRIORITY_CAP_MS = 1300;
+const NETWORK_MELODY_PRIORITY_FLOOR_MS = 900;
+const NETWORK_MELODY_TAIL_ALLOWANCE_MS = 520;
+const NETWORK_MELODY_BASE_OCTAVE: Record<Exclude<EchoEventType, "node_active">, number> = {
+  node_seen: 3,
+  channel_opened: 3,
+  channel_updated: 3,
+  payment_routed: 3,
+  path_used: 4,
+  region_activity_burst: 3
+};
+const NETWORK_MELODY_STEPS: Record<Exclude<EchoEventType, "node_active">, MelodyStepSpec[]> = {
+  node_seen: [
+    { delayMs: 0, interval: 0 },
+    { delayMs: 180, interval: 7 },
+    { delayMs: 390, interval: 12 }
+  ],
+  channel_opened: [
+    { delayMs: 0, interval: 0 },
+    { delayMs: 150, interval: 7 },
+    { delayMs: 320, interval: 12 },
+    { delayMs: 540, interval: 7 }
+  ],
+  channel_updated: [
+    { delayMs: 0, interval: 7 },
+    { delayMs: 190, interval: 0 },
+    { delayMs: 390, interval: 7 }
+  ],
+  payment_routed: [
+    { delayMs: 0, interval: 0 },
+    { delayMs: 130, interval: 2 },
+    { delayMs: 290, interval: 7 },
+    { delayMs: 500, interval: 12 }
+  ],
+  path_used: [
+    { delayMs: 0, interval: 12 },
+    { delayMs: 210, interval: 7 },
+    { delayMs: 440, interval: 0 }
+  ],
+  region_activity_burst: [
+    { delayMs: 0, interval: 0 },
+    { delayMs: 140, interval: 7 },
+    { delayMs: 300, interval: 12 },
+    { delayMs: 520, interval: 9 },
+    { delayMs: 760, interval: 12 }
+  ]
+};
+
+function hashString(value: string) {
+  let hash = 0;
+
+  for (const char of value) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 100000;
+  }
+
+  return hash;
+}
 
 function isCollisionLikeResonanceEvent(event: EchoEvent) {
   const source = event.source ?? "network";
@@ -100,6 +169,10 @@ function isCollisionLikeResonanceEvent(event: EchoEvent) {
   );
 }
 
+function isNetworkMelodyEventType(eventType: EchoEventType): eventType is Exclude<EchoEventType, "node_active"> {
+  return eventType !== "node_active";
+}
+
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
   let audioContext: AudioContext | null = null;
@@ -109,6 +182,10 @@ export function createAudioEngine(): AudioEngine {
   let topologyBands = new Map<string, RegisterBand>();
   let lastDegreeByNode = new Map<string, DegreeHint>();
   let activeTransientVoices: ActiveTransientVoice[] = [];
+  let networkMelodyActiveUntil = 0;
+  let networkMelodyTimeoutIds = new Set<number>();
+  let networkMelodyPendingEvent: EchoEvent | null = null;
+  let networkMelodyDrainTimeoutId: number | null = null;
   let settings: AudioSettings = {
     density: "balanced",
     timbrePreset: "standard",
@@ -134,6 +211,24 @@ export function createAudioEngine(): AudioEngine {
   const getRootFrequency = () => {
     const rootMidi = 36 + ROOT_SEMITONE[settings.root];
     return 440 * Math.pow(2, (rootMidi - 69) / 12);
+  };
+
+  const clearNetworkMelodyTimers = () => {
+    networkMelodyTimeoutIds.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    networkMelodyTimeoutIds.clear();
+
+    if (networkMelodyDrainTimeoutId !== null) {
+      window.clearTimeout(networkMelodyDrainTimeoutId);
+      networkMelodyDrainTimeoutId = null;
+    }
+  };
+
+  const resetNetworkMelodyState = () => {
+    clearNetworkMelodyTimers();
+    networkMelodyActiveUntil = 0;
+    networkMelodyPendingEvent = null;
   };
 
   const getWeightedPitchesForBand = (band: RegisterBand) =>
@@ -194,6 +289,14 @@ export function createAudioEngine(): AudioEngine {
     const registerBand = event.registerBand ?? topologyBands.get(event.nodeId) ?? 1;
     const excludedDegrees: DegreeHint[] = [];
 
+    if (isCollisionLikeResonanceEvent(event)) {
+      const collisionInterval =
+        COLLISION_VOICING_INTERVALS[Math.max(0, ((event.rippleLayer ?? 1) - 1) % COLLISION_VOICING_INTERVALS.length)];
+      const degree = resolvePentatonicByInterval(settings.root, 3, collisionInterval);
+      lastDegreeByNode.set(event.nodeId, degree);
+      return { degree, registerBand };
+    }
+
     // Batch events prefer open pentatonic voicings before falling back to weighted choice.
     if (event.voiceCount && event.voiceCount > 1 && typeof event.voiceIndex === "number") {
       const batchDegrees = getChordPriorityByBand(registerBand, event.voiceCount);
@@ -236,6 +339,83 @@ export function createAudioEngine(): AudioEngine {
     const midi = (octave + 1) * 12 + semitone;
 
     return 440 * Math.pow(2, (midi - 69) / 12);
+  };
+
+  const shouldSuppressNodeActive = (event: EchoEvent) => {
+    if (event.type !== "node_active") {
+      return false;
+    }
+
+    const now = Date.now();
+    if (now >= networkMelodyActiveUntil) {
+      return false;
+    }
+
+    const source = event.source ?? "network";
+    return source === "ambient" || source === "resonance";
+  };
+
+  const getNetworkMelodySpec = (event: EchoEvent): MelodySpec | null => {
+    if (!isNetworkMelodyEventType(event.type)) {
+      return null;
+    }
+
+    const registerBand = event.registerBand ?? topologyBands.get(event.nodeId) ?? 2;
+    const baseOctave = Math.min(
+      5,
+      Math.max(2, NETWORK_MELODY_BASE_OCTAVE[event.type] + (event.type === "payment_routed" || event.type === "path_used" ? Math.max(0, registerBand - 2) : 0))
+    );
+
+    return {
+      baseOctave,
+      steps: NETWORK_MELODY_STEPS[event.type]
+    };
+  };
+
+  const playNetworkMelody = (event: EchoEvent) => {
+    const melodySpec = getNetworkMelodySpec(event);
+    if (!melodySpec || !enabled) {
+      return;
+    }
+
+    clearNetworkMelodyTimers();
+    networkMelodyPendingEvent = null;
+
+    const lastDelay = melodySpec.steps[melodySpec.steps.length - 1]?.delayMs ?? 0;
+    const priorityDuration = Math.max(
+      NETWORK_MELODY_PRIORITY_FLOOR_MS,
+      Math.min(NETWORK_MELODY_PRIORITY_CAP_MS, lastDelay + NETWORK_MELODY_TAIL_ALLOWANCE_MS)
+    );
+    networkMelodyActiveUntil = Date.now() + priorityDuration;
+
+    melodySpec.steps.forEach((step, index) => {
+      const timeoutId = window.setTimeout(() => {
+        networkMelodyTimeoutIds.delete(timeoutId);
+
+        void playTransientVoice({
+          ...event,
+          at: new Date().toISOString(),
+          degreeHint: resolvePentatonicByInterval(settings.root, melodySpec.baseOctave, step.interval),
+          voiceIndex: index,
+          voiceCount: melodySpec.steps.length,
+          batchRole: index === 0 ? "lead" : index === melodySpec.steps.length - 1 ? "tail" : "support",
+          intensity: Math.max(0.28, event.intensity * (index === 0 ? 1 : Math.max(0.48, 0.82 - index * 0.12)))
+        });
+      }, step.delayMs);
+
+      networkMelodyTimeoutIds.add(timeoutId);
+    });
+
+    networkMelodyDrainTimeoutId = window.setTimeout(() => {
+      networkMelodyDrainTimeoutId = null;
+      networkMelodyActiveUntil = 0;
+
+      const pendingEvent = networkMelodyPendingEvent;
+      networkMelodyPendingEvent = null;
+      if (pendingEvent && enabled) {
+        playNetworkMelody(pendingEvent);
+      }
+    }, priorityDuration);
   };
 
   const cleanupVoices = () => {
@@ -400,14 +580,20 @@ export function createAudioEngine(): AudioEngine {
     const pluckGain = context.createGain();
     const bodyGain = context.createGain();
     const airGain = context.createGain();
+    const spatialPanner = isCollisionLike ? context.createStereoPanner() : null;
+    const panLfo = isCollisionLike ? context.createOscillator() : null;
+    const panDepth = isCollisionLike ? context.createGain() : null;
     const attack = 0.008;
-    const bodyDuration = isCollisionLike ? 0.18 : source === "resonance" ? 0.48 : 0.32;
-    const tailDuration = isCollisionLike ? 0.75 : source === "resonance" ? 2.6 : source === "ambient" ? 1.7 : 2.1;
+    const resonanceBodyDuration = batchRole === "lead" ? 0.42 : batchRole === "tail" ? 0.26 : 0.32;
+    const resonanceTailDuration = batchRole === "lead" ? 2.2 : batchRole === "tail" ? 1.45 : 1.7;
+    const bodyDuration = isCollisionLike ? 0.12 : source === "resonance" ? resonanceBodyDuration : 0.32;
+    const tailDuration = isCollisionLike ? 1.45 : source === "resonance" ? resonanceTailDuration : source === "ambient" ? 1.7 : 2.1;
+    const resonanceGainMultiplier = batchRole === "lead" ? 1.12 : batchRole === "tail" ? 0.7 : 0.84;
     const baseGain =
       (source === "resonance" ? 0.06 : 0.045) *
-      (batchRole === "lead" ? 1.15 : 1) *
+      (source === "resonance" ? resonanceGainMultiplier : batchRole === "lead" ? 1.15 : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
-    const maxGain = baseGain * (isCollisionLike ? 0.62 : 1);
+    const maxGain = baseGain * (isCollisionLike ? 0.6 : 1);
 
     // Blend a short pluck, a resonant body, and a faint airy tail for the default voice.
     const data = airBuffer.getChannelData(0);
@@ -416,7 +602,7 @@ export function createAudioEngine(): AudioEngine {
     }
 
     pluckOscillator.type = isCollisionLike ? "sine" : "triangle";
-    pluckOscillator.frequency.setValueAtTime(frequency * (isCollisionLike ? 1.5 : 2), now);
+    pluckOscillator.frequency.setValueAtTime(frequency * 2, now);
 
     bodyOscillator.type = "sine";
     bodyOscillator.frequency.setValueAtTime(frequency, now);
@@ -424,33 +610,33 @@ export function createAudioEngine(): AudioEngine {
 
     pluckFilter.type = "bandpass";
     pluckFilter.frequency.setValueAtTime(
-      Math.min(isCollisionLike ? 1500 : 2600, frequency * (isCollisionLike ? 2.1 : 3.5)),
+      Math.min(isCollisionLike ? 1900 : 2600, frequency * (isCollisionLike ? 2.5 : 3.5)),
       now
     );
     pluckFilter.Q.setValueAtTime(isCollisionLike ? 0.9 : 1.2, now);
 
     bodyFilter.type = "lowpass";
     bodyFilter.frequency.setValueAtTime(
-      isCollisionLike ? 420 + event.intensity * 280 : 700 + event.intensity * 550,
+      isCollisionLike ? 420 + event.intensity * 160 : 700 + event.intensity * 550,
       now
     );
     bodyFilter.Q.setValueAtTime(isCollisionLike ? 0.62 : 0.9, now);
 
-    airFilter.type = "highpass";
-    airFilter.frequency.setValueAtTime(isCollisionLike ? 2200 : 1800, now);
-    airFilter.Q.setValueAtTime(isCollisionLike ? 0.5 : 0.7, now);
+    airFilter.type = isCollisionLike ? "bandpass" : "highpass";
+    airFilter.frequency.setValueAtTime(isCollisionLike ? 3400 : 1800, now);
+    airFilter.Q.setValueAtTime(isCollisionLike ? 1.1 : 0.7, now);
 
     pluckGain.gain.setValueAtTime(0.0001, now);
-    pluckGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.45 : 0.62), now + attack);
-    pluckGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? 0.09 : 0.16));
+    pluckGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.28 : 0.62), now + attack);
+    pluckGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? 0.08 : 0.16));
 
     bodyGain.gain.setValueAtTime(0.0001, now);
-    bodyGain.gain.linearRampToValueAtTime(maxGain, now + (isCollisionLike ? 0.015 : 0.03));
+    bodyGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.62 : 1), now + (isCollisionLike ? 0.015 : 0.03));
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + bodyDuration + tailDuration);
 
     airGain.gain.setValueAtTime(0.0001, now);
-    airGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.03 : 0.08), now + 0.06);
-    airGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? tailDuration * 0.7 : tailDuration));
+    airGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.13 : 0.08), now + 0.06);
+    airGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? tailDuration : tailDuration));
 
     pluckOscillator.connect(pluckFilter);
     pluckFilter.connect(pluckGain);
@@ -465,7 +651,24 @@ export function createAudioEngine(): AudioEngine {
     airFilter.connect(airGain);
     airGain.connect(masterGain);
 
-    masterGain.connect(context.destination);
+    if (spatialPanner && panLfo && panDepth) {
+      const panSeed = hashString(event.id) + hashString(event.nodeId) * 0.5;
+      const basePan = ((panSeed % 1000) / 1000) * 1.1 - 0.55;
+
+      spatialPanner.pan.setValueAtTime(basePan, now);
+      panDepth.gain.setValueAtTime(0.16, now);
+      panLfo.type = "sine";
+      panLfo.frequency.setValueAtTime(0.24, now);
+
+      masterGain.connect(spatialPanner);
+      panLfo.connect(panDepth);
+      panDepth.connect(spatialPanner.pan);
+      spatialPanner.connect(context.destination);
+      panLfo.start(now);
+      panLfo.stop(now + tailDuration + 0.08);
+    } else {
+      masterGain.connect(context.destination);
+    }
 
     pluckOscillator.start(now);
     bodyOscillator.start(now);
@@ -482,6 +685,7 @@ export function createAudioEngine(): AudioEngine {
       pluckOscillator.stop(releaseNow + 0.1);
       bodyOscillator.stop(releaseNow + 0.1);
       airSource.stop(releaseNow + 0.1);
+      panLfo?.stop(releaseNow + 0.1);
     };
 
     activeTransientVoices.push({
@@ -498,6 +702,9 @@ export function createAudioEngine(): AudioEngine {
       pluckOscillator.disconnect();
       bodyOscillator.disconnect();
       airSource.disconnect();
+      panLfo?.disconnect();
+      panDepth?.disconnect();
+      spatialPanner?.disconnect();
       pluckFilter.disconnect();
       bodyFilter.disconnect();
       airFilter.disconnect();
@@ -519,6 +726,7 @@ export function createAudioEngine(): AudioEngine {
     disable() {
       enabled = false;
       stopAmbient(0.5);
+      resetNetworkMelodyState();
       cleanupVoices();
       if (audioContext) {
         const now = audioContext.currentTime;
@@ -548,11 +756,26 @@ export function createAudioEngine(): AudioEngine {
         return;
       }
 
+      if (isNetworkMelodyEventType(event.type)) {
+        if (Date.now() < networkMelodyActiveUntil) {
+          networkMelodyPendingEvent = event;
+          return;
+        }
+
+        playNetworkMelody(event);
+        return;
+      }
+
+      if (shouldSuppressNodeActive(event)) {
+        return;
+      }
+
       void playTransientVoice(event);
     },
     dispose() {
       enabled = false;
       stopAmbient(0.1);
+      resetNetworkMelodyState();
       activeTransientVoices.forEach((voice) => voice.stop());
       activeTransientVoices = [];
 

@@ -1,6 +1,7 @@
 import { AccessibilitySystem, Application, Container } from "pixi.js";
 import type { EchoEvent } from "@echo/contracts";
 import { createWorldMapProjection, type WorldMapProjection } from "../../lib/map-projection";
+import { getNodeViewLayoutSeed } from "../../lib/node-view-layout";
 import { createMapSceneLayer, findMapNodeAtPoint, renderMapScene } from "./pixi-map-scene";
 import { createNodeSceneLayer, findNodeScenePeerAtPoint, renderNodeScene } from "./pixi-node-scene";
 import type { CollisionBurst, RenderSnapshot, VisualProfile } from "./pixi-types";
@@ -92,8 +93,11 @@ export class PixiSurface {
       nextSnapshot.selectedNodeId !== null &&
       nextSnapshot.selectedNodeId !== this.snapshot.selectedNodeId;
 
-    if (shouldReseed) {
-      this.localLayoutSeed = Math.random() * 100000;
+    if ((shouldReseed || nodeSceneSelectionChanged) && nextSnapshot.selectedNodeId) {
+      this.localLayoutSeed = getNodeViewLayoutSeed(nextSnapshot.selectedNodeId);
+    }
+
+    if (shouldReseed || nodeSceneSelectionChanged) {
       this.collisionHistory.clear();
       this.collisionBursts = [];
     }

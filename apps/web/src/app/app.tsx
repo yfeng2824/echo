@@ -1,7 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   AudioDensity,
-  BatchRole,
   DegreeHint,
   EchoEvent,
   EchoNode,
@@ -13,6 +12,7 @@ import type {
 import { createAudioEngine } from "../engine/audio/audio-engine";
 import { createApiNetworkSimulation, fetchSceneBootstrap } from "../lib/api-client";
 import { buildRegisterBandMap } from "../lib/network";
+import { pickNodeViewPhraseDelay, planNodeViewPhrase } from "../lib/node-view-audio";
 import { resolvePentatonicDegree, type ScaleDegreeKey } from "../lib/pentatonic";
 import { useSceneRouting } from "../scenes/use-scene-routing";
 import { useAppStore } from "../state/app-store";
@@ -42,20 +42,14 @@ const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
   4: ["root", "second", "fifth", "sixth"]
 };
 
-const RESONANCE_PEER_DEGREES: ScaleDegreeKey[] = ["third", "fifth", "sixth", "third"];
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
+const NODE_VIEW_PHRASE_SETTLE_MS = 2400;
 const STARTUP_AUDIO_MUTE_MS = 1000;
 
 const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
   sparse: { min: 900, max: 1500 },
   balanced: { min: 700, max: 1200 },
   rich: { min: 450, max: 900 }
-};
-
-const RESONANCE_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
-  sparse: { min: 2100, max: 3100 },
-  balanced: { min: 1750, max: 2600 },
-  rich: { min: 1400, max: 2100 }
 };
 
 const EMPTY_HEADLINE_COUNTS: HeadlineCounts = {
@@ -75,7 +69,7 @@ const SILENT_SIMULATION: NetworkSimulation = {
   stop() {}
 };
 
-function getBatchRole(index: number, voiceCount: number): BatchRole {
+function getBatchRole(index: number, voiceCount: number): EchoEvent["batchRole"] {
   if (index === 0) {
     return "lead";
   }
@@ -200,44 +194,6 @@ function createAmbientEvent(
     batchId,
     batchRole: getBatchRole(index, batchSize),
     source: "ambient"
-  };
-}
-
-function createResonanceEvent(
-  node: EchoNode,
-  selectedNodeId: string,
-  index: number,
-  batchSize: number,
-  batchId: string,
-  timestamp: string,
-  registerBandMap: Map<string, RegisterBand>,
-  anchorDegree: DegreeHint,
-  root: AppStoreState["audioSettings"]["root"]
-): EchoEvent {
-  const isSelectedNode = node.id === selectedNodeId;
-  const registerBand = registerBandMap.get(node.id) ?? 1;
-
-  return {
-    id: `${batchId}-${index}-${node.id}`,
-    type: "node_active",
-    at: timestamp,
-    nodeId: node.id,
-    intensity: isSelectedNode
-      ? Math.min(1, 0.58 + node.intensity * 0.62)
-      : Math.min(0.86, 0.34 + node.intensity * 0.46),
-    voiceIndex: index,
-    voiceCount: batchSize,
-    registerBand,
-    degreeHint: isSelectedNode
-      ? anchorDegree
-      : resolvePitchForBand(
-          registerBand,
-          root,
-          RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length]
-        ),
-    batchId,
-    batchRole: getBatchRole(index, batchSize),
-    source: "resonance"
   };
 }
 
@@ -489,49 +445,72 @@ export function App() {
       return;
     }
 
-    const localNodes = [selectedNode, ...nodes.filter((node) => selectedNode.peers.includes(node.id))];
     const registerBandMap = buildRegisterBandMap(nodes);
-    const delayRange = RESONANCE_DELAY_BY_DENSITY[audioSettings.density];
     let timeoutId = 0;
+    let phraseHoldUntil = 0;
+    const scheduledStepTimeouts = new Set<number>();
 
-    const schedulePhrase = () => {
-      timeoutId = window.setTimeout(() => {
-        const timestamp = new Date().toISOString();
-        const batchId = `resonance-${Date.now()}`;
-        const selectedRegisterBand = registerBandMap.get(selectedNode.id) ?? 1;
-        const anchorDegree: DegreeHint =
-          Math.random() > 0.55
-            ? resolvePitchForBand(selectedRegisterBand, audioSettings.root, "root")
-            : resolvePitchForBand(selectedRegisterBand, audioSettings.root, "fifth");
+    const clearScheduledSteps = () => {
+      scheduledStepTimeouts.forEach((scheduledTimeoutId) => {
+        window.clearTimeout(scheduledTimeoutId);
+      });
+      scheduledStepTimeouts.clear();
+    };
 
-        // Fire the local field as one breath so audio and collision visuals stay aligned.
-        localNodes.forEach((node, index) => {
-          const event = createResonanceEvent(
-            node,
-            selectedNode.id,
-            index,
-            localNodes.length,
-            batchId,
-            timestamp,
-            registerBandMap,
-            anchorDegree,
-            audioSettings.root
-          );
+    const dispatchPhrase = () => {
+      const steps = planNodeViewPhrase({
+        nodes,
+        selectedNodeId: selectedNode.id,
+        root: audioSettings.root,
+        registerBandMap,
+        phraseId: `resonance-${Date.now()}`
+      });
 
+      if (steps.length === 0) {
+        return;
+      }
+
+      phraseHoldUntil = Date.now() + NODE_VIEW_PHRASE_SETTLE_MS;
+      clearScheduledSteps();
+
+      steps.forEach((step) => {
+        const scheduledTimeoutId = window.setTimeout(() => {
+          scheduledStepTimeouts.delete(scheduledTimeoutId);
+
+          const event = {
+            ...step.event,
+            at: new Date().toISOString()
+          };
           appendEvent(event);
           if (audioEnabled) {
             audio?.trigger(event);
           }
-        });
+        }, step.delayMs);
+
+        scheduledStepTimeouts.add(scheduledTimeoutId);
+      });
+    };
+
+    const schedulePhrase = (delayMs = pickNodeViewPhraseDelay(audioSettings.density)) => {
+      timeoutId = window.setTimeout(() => {
+        const now = Date.now();
+
+        if (now < phraseHoldUntil) {
+          schedulePhrase(Math.max(160, phraseHoldUntil - now));
+          return;
+        }
+
+        dispatchPhrase();
 
         schedulePhrase();
-      }, pickDelay(delayRange));
+      }, delayMs);
     };
 
     schedulePhrase();
 
     return () => {
       window.clearTimeout(timeoutId);
+      clearScheduledSteps();
     };
   }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, audioSettings.root, nodes, selectedNodeId]);
 

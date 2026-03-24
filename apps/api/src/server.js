@@ -69,7 +69,9 @@ app.get("/events", async (request) => {
     ? store.recentEvents.filter((event) => new Date(event.at).getTime() >= new Date(since).getTime())
     : store.recentEvents;
 
-  return { events };
+  return {
+    events: [...events].sort((left, right) => new Date(left.at).getTime() - new Date(right.at).getTime())
+  };
 });
 
 await Promise.all([refreshNetwork("testnet"), refreshNetwork("mainnet")]);
