@@ -13,7 +13,9 @@ type MapSceneLayer = {
   ripples: Graphics;
   halos: Graphics;
   cores: Graphics;
-  label: Text;
+  hoverInfo: Container;
+  hoverLabels: Text[];
+  hoverValues: Text[];
 };
 
 export function createMapSceneLayer() {
@@ -23,30 +25,48 @@ export function createMapSceneLayer() {
   const mapSprite = new Sprite(
     new Texture({
       source: new CanvasSource({
-        resource: mapCanvas
-      })
+        resource: mapCanvas,
+      }),
     })
   );
   const links = new Graphics();
   const ripples = new Graphics();
   const halos = new Graphics();
   const cores = new Graphics();
-  const label = new Text({
-    text: "",
-    style: new TextStyle({
-      fontFamily: "Inter, sans-serif",
-      fontSize: 10,
-      fill: 0xffffff,
-      letterSpacing: 0.3
-    })
+  const hoverInfo = new Container();
+  const labelStyle = new TextStyle({
+    fontFamily: "Inter, sans-serif",
+    fontSize: 10,
+    fill: 0xffffff,
+    letterSpacing: 0.3,
+  });
+  const valueStyle = new TextStyle({
+    fontFamily: "Inter, sans-serif",
+    fontSize: 10,
+    fill: 0xffffff,
+    letterSpacing: 0.3,
+  });
+  const hoverLabels = Array.from({ length: 4 }, () => new Text({ text: "", style: labelStyle }));
+  const hoverValues = Array.from({ length: 4 }, () => new Text({ text: "", style: valueStyle }));
+
+  hoverInfo.visible = false;
+  hoverInfo.alpha = 0.7;
+  hoverLabels.forEach((text, index) => {
+    text.alpha = 0.4;
+    text.roundPixels = true;
+    text.resolution = Math.min(window.devicePixelRatio || 1, 2);
+    text.y = index * 15;
+    hoverInfo.addChild(text);
+  });
+  hoverValues.forEach((text, index) => {
+    text.roundPixels = true;
+    text.resolution = Math.min(window.devicePixelRatio || 1, 2);
+    text.y = index * 15;
+    text.x = 116;
+    hoverInfo.addChild(text);
   });
 
-  label.visible = false;
-  label.alpha = 0.7;
-  label.roundPixels = true;
-  label.resolution = Math.min(window.devicePixelRatio || 1, 2);
-
-  root.addChild(mapSprite, links, ripples, halos, cores, label);
+  root.addChild(mapSprite, links, ripples, halos, cores, hoverInfo);
 
   return {
     root,
@@ -57,7 +77,9 @@ export function createMapSceneLayer() {
     ripples,
     halos,
     cores,
-    label
+    hoverInfo,
+    hoverLabels,
+    hoverValues,
   } satisfies MapSceneLayer;
 }
 
@@ -90,8 +112,33 @@ function getNodeEvents(events: EchoEvent[], nodeId: string) {
   return events.filter((event) => event.nodeId === nodeId);
 }
 
+function getVisibleNodeEvents(
+  events: EchoEvent[],
+  nodeId: string,
+  context: RenderContext,
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
+) {
+  const nodeEvents = getNodeEvents(events, nodeId);
+  const activePriorityEvents = nodeEvents.filter((event) => {
+    if (event.type === "node_active") {
+      return false;
+    }
+
+    const profile = getVisualProfile(event, "map");
+    const age = context.now - new Date(event.at).getTime();
+    return age >= 0 && age <= profile.duration;
+  });
+
+  return activePriorityEvents.length > 0 ? activePriorityEvents : nodeEvents;
+}
+
 function getMapPosition(node: EchoNode, context: RenderContext) {
-  return context.projection.project(node.lng, node.lat) ?? { x: context.width / 2, y: context.height / 2 };
+  return (
+    context.projection.project(node.lng, node.lat) ?? {
+      x: context.width / 2,
+      y: context.height / 2,
+    }
+  );
 }
 
 type MapNodeLayout = {
@@ -129,7 +176,7 @@ function buildMapNodeLayout(nodes: EchoNode[], context: RenderContext) {
     return {
       node,
       x: projected.x,
-      y: projected.y
+      y: projected.y,
     };
   });
 
@@ -185,7 +232,7 @@ function buildMapNodeLayout(nodes: EchoNode[], context: RenderContext) {
         anchorX,
         anchorY,
         x: anchorX,
-        y: anchorY
+        y: anchorY,
       });
       return;
     }
@@ -207,7 +254,7 @@ function buildMapNodeLayout(nodes: EchoNode[], context: RenderContext) {
           anchorX,
           anchorY,
           x: anchorX + Math.cos(angle) * radius,
-          y: anchorY + Math.sin(angle) * radius
+          y: anchorY + Math.sin(angle) * radius,
         });
       }
 
@@ -293,13 +340,17 @@ function getActiveRipples(
       return {
         intensity: event.intensity,
         progress: age / profile.duration,
-        profile
+        profile,
       } satisfies ActiveRipple;
     })
     .filter((ripple): ripple is ActiveRipple => ripple !== null);
 }
 
-function getVisibleRipples(activeRipples: ActiveRipple[], hasTransitionNode: boolean, isTransitionNode: boolean) {
+function getVisibleRipples(
+  activeRipples: ActiveRipple[],
+  hasTransitionNode: boolean,
+  isTransitionNode: boolean
+) {
   if (!hasTransitionNode) {
     return activeRipples;
   }
@@ -307,8 +358,16 @@ function getVisibleRipples(activeRipples: ActiveRipple[], hasTransitionNode: boo
   return isTransitionNode ? activeRipples.slice(0, 1) : [];
 }
 
-function getPulse(visibleRipples: ActiveRipple[], easedFocus: number, hasTransitionNode: boolean, isTransitionNode: boolean) {
-  const pulseEnergy = visibleRipples.reduce((sum, ripple) => sum + (1 - ripple.progress) * ripple.intensity, 0);
+function getPulse(
+  visibleRipples: ActiveRipple[],
+  easedFocus: number,
+  hasTransitionNode: boolean,
+  isTransitionNode: boolean
+) {
+  const pulseEnergy = visibleRipples.reduce(
+    (sum, ripple) => sum + (1 - ripple.progress) * ripple.intensity,
+    0
+  );
 
   if (!hasTransitionNode) {
     return Math.max(0.12, Math.min(1.4, pulseEnergy));
@@ -343,7 +402,7 @@ function applyMapFocusTransform(
   const focusDrift = transitionPosition
     ? {
         x: (context.width / 2 - transitionPosition.anchorX) * easedFocus * 0.34,
-        y: (context.height / 2 - transitionPosition.anchorY) * easedFocus * 0.34
+        y: (context.height / 2 - transitionPosition.anchorY) * easedFocus * 0.34,
       }
     : { x: 0, y: 0 };
 
@@ -363,12 +422,12 @@ export function renderMapScene(
   context: RenderContext,
   getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
 ) {
-  const { nodes, mapSearchTransition, recentEvents } = snapshot;
+  const { nodes, channels, mapSearchTransition, recentEvents } = snapshot;
   const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
   const mapNodeLayout = buildMapNodeLayout(nodes, context);
   const hoveredNode =
     !isCoarsePointer && hoverState.hoveredNodeId
-      ? nodes.find((node) => node.id === hoverState.hoveredNodeId) ?? null
+      ? (nodes.find((node) => node.id === hoverState.hoveredNodeId) ?? null)
       : null;
   const connectedNodeIds = new Set<string>();
   if (hoveredNode) {
@@ -384,10 +443,13 @@ export function renderMapScene(
     });
   }
   const transitionNode = mapSearchTransition
-    ? nodes.find((node) => node.id === mapSearchTransition.nodeId) ?? null
+    ? (nodes.find((node) => node.id === mapSearchTransition.nodeId) ?? null)
     : null;
-  const { easedFocus } = getMapSearchFocusState(mapSearchTransition?.startedAt ?? null, context.now);
-  const transitionPosition = transitionNode ? mapNodeLayout.get(transitionNode.id) ?? null : null;
+  const { easedFocus } = getMapSearchFocusState(
+    mapSearchTransition?.startedAt ?? null,
+    context.now
+  );
+  const transitionPosition = transitionNode ? (mapNodeLayout.get(transitionNode.id) ?? null) : null;
   const hasTransitionNode = transitionNode !== null;
 
   applyMapFocusTransform(layer, context, transitionPosition, easedFocus);
@@ -399,7 +461,7 @@ export function renderMapScene(
   layer.links.clear();
   layer.halos.clear();
   layer.cores.clear();
-  layer.label.visible = false;
+  layer.hoverInfo.visible = false;
 
   if (hoveredNode && !hasTransitionNode) {
     const hoveredLayout = mapNodeLayout.get(hoveredNode.id);
@@ -419,7 +481,7 @@ export function renderMapScene(
         layer.links.stroke({
           color: 0xffffff,
           alpha: 0.3,
-          width: 1
+          width: 1,
         });
       });
     }
@@ -430,21 +492,46 @@ export function renderMapScene(
     const x = layout?.x ?? context.width / 2;
     const y = layout?.y ?? context.height / 2;
     const isTransitionNode = transitionNode?.id === node.id;
-    const activeRipples = getActiveRipples(getNodeEvents(recentEvents, node.id), context, getVisualProfile);
+    const activeRipples = getActiveRipples(
+      getVisibleNodeEvents(recentEvents, node.id, context, getVisualProfile),
+      context,
+      getVisualProfile
+    );
     const visibleRipples = getVisibleRipples(activeRipples, hasTransitionNode, isTransitionNode);
     const pulse = getPulse(visibleRipples, easedFocus, hasTransitionNode, isTransitionNode);
     const isHovered = hoverState.hoveredNodeId === node.id;
     const isConnectedToHovered = connectedNodeIds.has(node.id);
     const hasHoverContext = hoveredNode !== null && !hasTransitionNode;
-    const halo = getHaloRadius(pulse, isHovered, isTransitionNode, easedFocus, context, index, hasTransitionNode);
-    const hoverHaloBoost = hasHoverContext ? (isHovered ? 2.8 : isConnectedToHovered ? 1.8 : -1.5) : 0;
+    const halo = getHaloRadius(
+      pulse,
+      isHovered,
+      isTransitionNode,
+      easedFocus,
+      context,
+      index,
+      hasTransitionNode
+    );
+    const hoverHaloBoost = hasHoverContext
+      ? isHovered
+        ? 2.8
+        : isConnectedToHovered
+          ? 1.8
+          : -1.5
+      : 0;
     const haloRadius = Math.max(4, halo + hoverHaloBoost);
-    const coreSizeBoost = hasHoverContext ? (isHovered ? 1.3 : isConnectedToHovered ? 0.7 : -0.6) : 0;
+    const coreSizeBoost = hasHoverContext
+      ? isHovered
+        ? 1.3
+        : isConnectedToHovered
+          ? 0.7
+          : -0.6
+      : 0;
     const coreRadius = (isHovered ? 4 : 3) + Math.min(2, pulse * 1.5) + coreSizeBoost;
 
     for (const ripple of visibleRipples) {
       const rippleRadius = 8 + ripple.progress * ripple.profile.radius;
-      const rippleAlpha = (1 - ripple.progress) * ripple.profile.alpha * (isTransitionNode ? 0.45 : 1);
+      const rippleAlpha =
+        (1 - ripple.progress) * ripple.profile.alpha * (isTransitionNode ? 0.45 : 1);
       layer.ripples.circle(x, y, rippleRadius);
       layer.ripples.stroke({ color: 0xffffff, alpha: rippleAlpha, width: 1 });
     }
@@ -470,7 +557,7 @@ export function renderMapScene(
             : isConnectedToHovered
               ? 0.07 + pulse * 0.11
               : 0.015 + pulse * 0.04
-          : 0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0)
+          : 0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0),
     });
 
     layer.cores.circle(x, y, Math.max(2.4, coreRadius));
@@ -486,14 +573,35 @@ export function renderMapScene(
             : isConnectedToHovered
               ? 0.76
               : 0.24
-          : 0.85
+          : 0.85,
     });
 
     if (!hasTransitionNode && isHovered && !isCoarsePointer) {
-      layer.label.text = getDisplayNodeId(node);
-      layer.label.x = x + halo + 6;
-      layer.label.y = y - 6;
-      layer.label.visible = true;
+      const activeChannelCount = channels.filter(
+        (channel) => channel.sourceNodeId === node.id || channel.targetNodeId === node.id
+      ).length;
+      const rows = [
+        { label: "ID", value: getDisplayNodeId(node) },
+        { label: "ACTIVE CHANNELS", value: String(activeChannelCount) },
+        { label: "ANNOUNCED PEERS", value: String(node.peers.length) },
+      ];
+
+      if (node.label?.trim()) {
+        rows.splice(1, 0, { label: "ALIAS", value: node.label });
+      }
+
+      rows.forEach((row, index) => {
+        layer.hoverLabels[index].text = row.label;
+        layer.hoverValues[index].text = row.value;
+      });
+      for (let index = rows.length; index < layer.hoverLabels.length; index += 1) {
+        layer.hoverLabels[index].text = "";
+        layer.hoverValues[index].text = "";
+      }
+
+      layer.hoverInfo.x = x + halo + 6;
+      layer.hoverInfo.y = y - 6;
+      layer.hoverInfo.visible = true;
     }
   });
 }

@@ -1,30 +1,23 @@
 # Echo
 
-Echo is a visual + sonic demo for the Fiber network. It has two scenes: a full-screen world map that shows distributed network activity, and a node-focused resonance view that narrows attention to one node and its connected peers.
+Echo is a visual and sonic demo for the Fiber network. It pairs a world-map overview with a focused node view, using live adapter-backed data and a pentatonic audio system to make network activity feel spatial, continuous, and legible.
 
-## Current Stack
+## What It Includes
 
 - React + TypeScript + Vite
 - Zustand
-- Shared contracts package in `packages/contracts`
-- Pixi-based renderer with a `d3-geo` world-map foundation
-- Custom Web Audio pentatonic system
+- Pixi rendering with a `d3-geo` world-map foundation
+- Custom Web Audio engine with pentatonic voicing
 - Fastify adapter service in `apps/api`
-
-## Current Features
-
-- Dual-scene experience: a world map overview and a focused node resonance scene.
-- Searchable node navigation with direct transition into node context.
-- Interactive control surface for network selection, sound muting, and tonal shaping.
-- Responsive controls that adapt between desktop and compact mobile flows.
-- Adapter-backed live bootstrap plus polled event updates from the API layer.
-- Atmospheric black-and-white visual rendering paired with pentatonic audio feedback.
+- Shared contracts in `packages/contracts`
+- A two-scene UI: map overview and node resonance view
+- Search-driven node navigation, network switching, and sound controls
 
 ## Project Structure
 
 ```text
 apps/
-  api/        Fastify adapter service for bootstrap, health, event polling, and upstream normalization
+  api/        Fastify adapter service for bootstrap, health, event polling, and dashboard normalization
   web/        UI, scenes, state, Pixi renderer, audio engine, and scene overlays
     src/lib/  Shared helpers for node IDs, queries, map projection, API access, and reusable client logic
     src/ui/pixi/  Pixi scene and transition rendering
@@ -32,24 +25,36 @@ packages/
   contracts/  Shared types for nodes, channels, events, and audio metadata
 ```
 
-## Run Locally
+## Local Development
 
 ```bash
 npm install
 npm run dev
 npm run dev:api
 npm run build
+npm run format
 ```
 
-The default `dev` script starts the web workspace. Run `npm run dev:api` alongside it when you want live adapter-backed data instead of web-only development.
+`npm run dev` starts the web app. Run `npm run dev:api` alongside it so the frontend can talk to the local adapter at `/api`.
 
-## Architecture Notes
+## Data Flow
 
-- The frontend bootstraps from `GET /bootstrap?net=...` and polls `GET /events?net=...&since=...` through `apps/web/src/lib/api-client.ts`.
-- The adapter exposes `GET /health`, `GET /bootstrap`, and `GET /events` from the Fastify service in `apps/api`.
-- The adapter uses the dashboard API as the single live-data source for both networks.
-- The web app talks to the local adapter instead of calling Fiber/dashboard upstreams directly.
-- The web app persists network, density, and root selections in local storage.
+- The web app loads its initial scene state from `GET /bootstrap?net=...`.
+- It polls `GET /events?net=...&since=...` for incremental activity updates.
+- The Fastify adapter exposes `GET /health`, `GET /bootstrap`, and `GET /events`.
+- The frontend talks only to the local adapter, not directly to Fiber dashboard upstreams.
+
+## Endpoint Usage
+
+- Header counts:
+  `Announced Nodes` comes from `nodes_hourly.total_count`.
+  `Active Channels` comes from `channel_count_by_state`, aggregated as `open + closed_waiting_onchain_settlement` across all assets.
+- Topology:
+  Rendered nodes and channels come from `nodes_hourly` and `channels_hourly`, with channel state enrichment from `group_channel_by_state`.
+- Node view:
+  The node scene reuses the normalized topology already returned by `/bootstrap`; it does not call a separate per-node upstream endpoint.
+- Events:
+  `/events` is produced by the adapter from topology refresh deltas and then polled by the frontend.
 
 ## Configuration
 
@@ -57,18 +62,16 @@ The default `dev` script starts the web workspace. Run `npm run dev:api` alongsi
 - `FIBER_REFRESH_INTERVAL_MS` controls adapter refresh cadence
 - `PORT` sets the API server port
 
-## Demo Notes
+## Interaction Notes
 
-- Rendering uses Pixi, with `d3-geo` providing the projection-based world map.
-- The sonic system uses a pentatonic design with selectable root (default `C`).
-- Sound defaults on with a short startup mute gate; muting disables audio while keeping visual motion active.
-- Search supports quick keyboard focus via `/`, and sound toggles via `M`.
-- Search is wired to direct node lookup and an empty-state overlay for unmatched IDs.
-- The node scene reseeds peer layout on entry so repeated visits feel different.
-- Collision-generated echo rings are capped to prevent noisy feedback loops.
+- Rendering uses Pixi, with `d3-geo` providing the projection-based world map
+- The sonic system uses a pentatonic design with selectable root
+- Sound defaults on with a short startup mute gate; muting disables audio while keeping visual motion active
+- Keyboard shortcuts are available for search focus and sound toggle
+- Invalid direct node routes show explicit not-found UX instead of silently falling back
+- The node scene reseeds peer layout on entry so repeated visits feel different
+- Collision-generated echo rings are capped to prevent noisy feedback loops
 
 ## Next Steps
 
-- Stabilize and refine the Pixi renderer
-- Deepen Fiber-backed data coverage beyond the current adapter foundation
-- Continue tuning sound density, resonance timing, and scene feel
+- Continue polishing the Pixi renderer and scene feel

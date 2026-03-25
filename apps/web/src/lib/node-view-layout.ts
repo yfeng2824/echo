@@ -56,7 +56,11 @@ export function getNodeViewLayoutSeed(selectedNodeId: string) {
   return hashString(selectedNodeId) * 0.37 + 17;
 }
 
-export function getNodeViewPeerOrbits(selectedNode: EchoNode, peers: EchoNode[], layoutSeed: number): NodeViewPeerOrbit[] {
+export function getNodeViewPeerOrbits(
+  selectedNode: EchoNode,
+  peers: EchoNode[],
+  layoutSeed: number
+): NodeViewPeerOrbit[] {
   const distances = peers.map((peer) => getGeoDistanceKm(selectedNode, peer));
   const minDistance = Math.min(...distances, 0);
   const maxDistance = Math.max(...distances, minDistance);
@@ -68,7 +72,9 @@ export function getNodeViewPeerOrbits(selectedNode: EchoNode, peers: EchoNode[],
     const angleJitter = (seededRandom(seedBase) - 0.5) * 0.7;
     const radialJitter = (seededRandom(seedBase + 11.3) - 0.5) * 0.08;
     const orbitBias = (seededRandom(seedBase + 23.7) - 0.5) * 26;
-    const angle = normalizeAngle((index / Math.max(peers.length, 1)) * FULL_TURN + angleJitter + orbitBias * 0.01);
+    const angle = normalizeAngle(
+      (index / Math.max(peers.length, 1)) * FULL_TURN + angleJitter + orbitBias * 0.01
+    );
     const normalizedDistance = Math.sqrt((distances[index] - minDistance) / distanceSpread);
     const proportionalOrbitDistance =
       MIN_ORBIT_DISTANCE + normalizedDistance * (MAX_ORBIT_DISTANCE - MIN_ORBIT_DISTANCE);
@@ -76,7 +82,11 @@ export function getNodeViewPeerOrbits(selectedNode: EchoNode, peers: EchoNode[],
     return {
       node: peer,
       angle,
-      orbitDistance: clamp(proportionalOrbitDistance + radialJitter, MIN_ORBIT_DISTANCE, MAX_ORBIT_DISTANCE)
+      orbitDistance: clamp(
+        proportionalOrbitDistance + radialJitter,
+        MIN_ORBIT_DISTANCE,
+        MAX_ORBIT_DISTANCE
+      ),
     };
   });
 }

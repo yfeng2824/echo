@@ -59,7 +59,7 @@ export function createApiNetworkSimulation(
   const seenEventIds = new Set(initialEvents.map((event) => event.id));
 
   return {
-    start(onEvent) {
+    start(onUpdate) {
       if (timer !== null) {
         return;
       }
@@ -77,13 +77,14 @@ export function createApiNetworkSimulation(
           }
 
           const payload = await fetchJson<EventFeed>(`/events?${params.toString()}`, {
-            signal: controller.signal
+            signal: controller.signal,
           });
 
           if (stopped || activeController !== controller) {
             return;
           }
 
+          const nextEvents = [];
           for (const event of payload.events) {
             if (seenEventIds.has(event.id)) {
               continue;
@@ -91,8 +92,13 @@ export function createApiNetworkSimulation(
 
             seenEventIds.add(event.id);
             lastSeenAt = getLatestTimestamp(lastSeenAt, event.at);
-            onEvent(event);
+            nextEvents.push(event);
           }
+
+          onUpdate({
+            events: nextEvents,
+            headlineCounts: payload.headlineCounts,
+          });
         } catch {
           // Keep the current scene alive if the adapter becomes briefly unavailable.
         } finally {
@@ -116,6 +122,6 @@ export function createApiNetworkSimulation(
 
       activeController?.abort();
       activeController = null;
-    }
+    },
   };
 }

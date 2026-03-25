@@ -2,7 +2,7 @@ import type { AudioSettings, EchoChannel, EchoNode, SceneId } from "./models";
 import type { EchoEvent } from "./events";
 
 export type HeadlineCounts = {
-  activeNodeCount: number;
+  announcedNodeCount: number;
   channelCount: number;
 };
 
@@ -15,10 +15,11 @@ export type SceneBootstrap = {
 
 export type EventFeed = {
   events: EchoEvent[];
+  headlineCounts: HeadlineCounts;
 };
 
 export type NetworkSimulation = {
-  start: (onEvent: (event: EchoEvent) => void) => void;
+  start: (onUpdate: (feed: EventFeed) => void) => void;
   stop: () => void;
 };
 

@@ -4,11 +4,12 @@ import type {
   AudioSettings,
   EchoChannel,
   EchoEvent,
+  EventFeed,
   EchoNetwork,
   EchoNode,
   HeadlineCounts,
   NetworkSimulation,
-  SceneId
+  SceneId,
 } from "@echo/contracts";
 
 type InitializeInput = {
@@ -47,6 +48,7 @@ type AppState = {
   audio: AudioEngine | null;
   initialize: (input: InitializeInput) => void;
   appendEvent: (event: EchoEvent) => void;
+  applyEventFeed: (feed: EventFeed) => void;
   setNetwork: (network: EchoNetwork) => void;
   setNetworkState: (status: AppState["networkStatus"], error?: string | null) => void;
   setNetworkTransitionVisible: (visible: boolean) => void;
@@ -63,13 +65,109 @@ type AppState = {
 const defaultAudioSettings: AudioSettings = {
   density: "balanced",
   timbrePreset: "standard",
-  root: "C"
+  root: "C",
 };
 
 const defaultHeadlineCounts: HeadlineCounts = {
-  activeNodeCount: 0,
-  channelCount: 0
+  announcedNodeCount: 0,
+  channelCount: 0,
 };
+
+function derivePeersFromChannels(nodes: EchoNode[], channels: EchoChannel[]) {
+  const peerSets = new Map(nodes.map((node) => [node.id, new Set<string>()]));
+
+  channels.forEach((channel) => {
+    peerSets.get(channel.sourceNodeId)?.add(channel.targetNodeId);
+    peerSets.get(channel.targetNodeId)?.add(channel.sourceNodeId);
+  });
+
+  return nodes.map((node) => {
+    const peers = [...(peerSets.get(node.id) ?? new Set<string>())].sort();
+    return {
+      ...node,
+      peers,
+    };
+  });
+}
+
+function applyChannelLifecycleEvent(nodes: EchoNode[], channels: EchoChannel[], event: EchoEvent) {
+  if (!event.channelId) {
+    return { nodes, channels };
+  }
+
+  const relatedNodeId = event.relatedNodeId ?? null;
+  const hasPrimaryNode = nodes.some((node) => node.id === event.nodeId);
+  const hasRelatedNode = relatedNodeId ? nodes.some((node) => node.id === relatedNodeId) : false;
+  let nextChannels = channels;
+
+  if (event.type === "channel_closed") {
+    if (!channels.some((channel) => channel.id === event.channelId)) {
+      return { nodes, channels };
+    }
+
+    nextChannels = channels.filter((channel) => channel.id !== event.channelId);
+    return {
+      nodes: derivePeersFromChannels(nodes, nextChannels),
+      channels: nextChannels,
+    };
+  }
+
+  if (event.type === "channel_opened") {
+    if (!relatedNodeId || !hasPrimaryNode || !hasRelatedNode) {
+      return { nodes, channels };
+    }
+
+    const existingChannel = channels.find((channel) => channel.id === event.channelId);
+    nextChannels = existingChannel
+      ? channels.map((channel) =>
+          channel.id === event.channelId
+            ? {
+                ...channel,
+                sourceNodeId: event.nodeId,
+                targetNodeId: relatedNodeId,
+                lastActiveAt: event.at,
+              }
+            : channel
+        )
+      : [
+          {
+            id: event.channelId,
+            sourceNodeId: event.nodeId,
+            targetNodeId: relatedNodeId,
+            strength: Math.max(0.42, Math.min(1, 0.46 + event.intensity * 0.4)),
+            lastActiveAt: event.at,
+          },
+          ...channels,
+        ];
+
+    return {
+      nodes: derivePeersFromChannels(nodes, nextChannels),
+      channels: nextChannels,
+    };
+  }
+
+  if (event.type === "channel_updated") {
+    if (!channels.some((channel) => channel.id === event.channelId)) {
+      return { nodes, channels };
+    }
+
+    nextChannels = channels.map((channel) =>
+      channel.id === event.channelId
+        ? {
+            ...channel,
+            lastActiveAt: event.at,
+          }
+        : channel
+    );
+
+    return {
+      nodes,
+      channels: nextChannels,
+    };
+  }
+
+  return { nodes, channels };
+}
 
 function getInitialNetwork(): EchoNetwork {
   if (typeof window === "undefined") {
@@ -111,7 +209,7 @@ function getInitialAudioSettings(): AudioSettings {
   return {
     ...defaultAudioSettings,
     density,
-    root
+    root,
   };
 }
 
@@ -149,21 +247,48 @@ export const useAppStore = create<AppState>((set, get) => ({
   simulation: null,
   audio: null,
   initialize: ({ simulation, audio, nodes, channels, recentEvents, headlineCounts }) => {
+    const nextNodes = derivePeersFromChannels(nodes, channels);
     set({
       simulation,
       audio,
-      nodes,
+      nodes: nextNodes,
       channels,
       recentEvents,
       headlineCounts,
-      selectedNodeId: nodes[0]?.id ?? null,
-      invalidNodeRouteId: null
+      selectedNodeId: nextNodes[0]?.id ?? null,
+      invalidNodeRouteId: null,
     });
   },
   appendEvent: (event) => {
-    set((state) => ({
-      recentEvents: [event, ...state.recentEvents].slice(0, 24)
-    }));
+    set((state) => {
+      const topology = applyChannelLifecycleEvent(state.nodes, state.channels, event);
+
+      return {
+        nodes: topology.nodes,
+        channels: topology.channels,
+        headlineCounts: state.headlineCounts,
+        recentEvents: [event, ...state.recentEvents].slice(0, 24),
+      };
+    });
+  },
+  applyEventFeed: (feed) => {
+    set((state) => {
+      let nextNodes = state.nodes;
+      let nextChannels = state.channels;
+
+      for (const event of feed.events) {
+        const topology = applyChannelLifecycleEvent(nextNodes, nextChannels, event);
+        nextNodes = topology.nodes;
+        nextChannels = topology.channels;
+      }
+
+      return {
+        nodes: nextNodes,
+        channels: nextChannels,
+        headlineCounts: feed.headlineCounts,
+        recentEvents: [...feed.events].reverse().concat(state.recentEvents).slice(0, 24),
+      };
+    });
   },
   setNetwork: (network) => {
     if (network === get().currentNetwork) {
@@ -179,13 +304,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       mapSearchTransition: null,
       invalidNodeRouteId: null,
       networkStatus: "loading",
-      networkError: null
+      networkError: null,
     });
   },
   setNetworkState: (status, error = null) => {
     set({
       networkStatus: status,
-      networkError: error
+      networkError: error,
     });
   },
   setNetworkTransitionVisible: (visible) => {
@@ -203,7 +328,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeScene: "node",
       nodeSceneEnteredAt: state.activeScene === "node" ? state.nodeSceneEnteredAt : Date.now(),
       mapSearchTransition: null,
-      invalidNodeRouteId: null
+      invalidNodeRouteId: null,
     }));
   },
   startMapSearchTransition: (nodeId) => {
@@ -211,8 +336,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: nodeId,
       mapSearchTransition: {
         nodeId,
-        startedAt: Date.now()
-      }
+        startedAt: Date.now(),
+      },
     });
   },
   clearMapSearchTransition: () => {
@@ -223,14 +348,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeScene: "map",
       nodeSceneEnteredAt: null,
       mapSearchTransition: null,
-      invalidNodeRouteId: null
+      invalidNodeRouteId: null,
     });
   },
   setAudioSettings: (nextSettings) => {
     set((state) => {
       const audioSettings = {
         ...state.audioSettings,
-        ...nextSettings
+        ...nextSettings,
       };
       persistAudioSettings(audioSettings);
       return { audioSettings };
@@ -249,5 +374,5 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({ audioEnabled: nextEnabled });
-  }
+  },
 }));

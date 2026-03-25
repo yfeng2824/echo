@@ -1,32 +1,41 @@
 # AGENTS.md
 
-- Project: Echo
-- Purpose: visual + sonic demo for Fiber network liveness
-- Treat this as a demo, not a production dashboard
+## Project
 
-## Build Rules
-- Add Fastify adapters in `apps/api`.
-- Keep shared types in `packages/contracts`.
-- Put reusable frontend helpers in `apps/web/src/lib`.
-- Route frontend data access through the app API layer, not upstream services directly.
-- Keep simulation, rendering, interaction, and audio in separate modules.
-- Keep Pixi as the rendering layer; keep controls and overlays outside Pixi.
+- Echo is a visual + sonic demo for Fiber network liveness.
+- Do not turn it into a cold dashboard or analytics tool.
+- Do not use mock, fake, or rewritten data.
 
-## UX Rules
-- Optimize for atmosphere and legibility, not dense analytics.
-- Keep the visual language minimal and black/white.
-- Keep the map treatment atmospheric; avoid dashboard or political-map styling.
-- Keep transitions continuous; avoid cut-style scene changes.
-- Keep interactions lightweight; prefer overlays over layout-shifting feedback.
-- Invalid manual node URLs should trigger explicit "not found" UX, not silent fallback.
-- Preserve desktop-first quality.
+## Data
 
-## Data And Audio Rules
-- Use derived truncated hex IDs for visible node labels; do not change internal graph IDs.
-- Keep collision echoes capped with the `rippleLayer` recursion limit.
-- Keep audio default-on with a short startup mute gate; when sound is toggled off, mute audio only and preserve visual motion.
-- Preserve the pentatonic system with user-selectable root (default `C`) unless the task explicitly changes it.
+- Keep one consistent data access strategy per data type.
+- Prefer the app API layer for consistency.
+- Use motion and sound to express liveness without changing underlying data.
+- Expose invalid states clearly.
+- Do not invent fallback behavior for ambiguous cases; discuss first.
 
-## Code Style
-- Remove unnecessary complexity before adding new structure.
-- Add comments only for non-obvious timing, sonic, or collision behavior.
+## UX
+
+- Follow a less-is-more approach.
+- Choose the simplest solution that fully solves the problem.
+- Every interactive element should provide immediate feedback.
+- Prefer continuous micro-motion over abrupt state changes.
+- Design desktop-first, with a fully responsive experience across all screen sizes.
+
+## Engineering
+
+- Fix root causes, not surface symptoms.
+- Do not trade main-path quality for edge-case handling.
+- Reuse helpers and components instead of duplicating code.
+- Avoid hacks, fake fallbacks, and logic that is not faithful to the real system.
+
+## Architecture
+
+- Keep simulation, rendering, interaction, and audio separate.
+- Keep behavior consistent across the product.
+
+## Commits
+
+- Run Prettier before every commit.
+- Follow Conventional Commits and use `<type>: <description>`
+- Keep messages lowercase, short, specific, and imperative.

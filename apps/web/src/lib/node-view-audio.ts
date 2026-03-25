@@ -1,19 +1,29 @@
-import type { AudioDensity, AudioRoot, DegreeHint, EchoEvent, EchoNode, RegisterBand } from "@echo/contracts";
+import type {
+  AudioDensity,
+  AudioRoot,
+  DegreeHint,
+  EchoEvent,
+  EchoNode,
+  RegisterBand,
+} from "@echo/contracts";
 import { resolvePentatonicByInterval } from "./pentatonic";
-import { getNodeViewLayoutSeed, getNodeViewPeerOrbits, sortNodeViewPeerOrbits } from "./node-view-layout";
+import {
+  getNodeViewLayoutSeed,
+  getNodeViewPeerOrbits,
+  sortNodeViewPeerOrbits,
+} from "./node-view-layout";
 
-const MAX_NODE_VIEW_PEERS = 5;
 const PEER_RESPONSE_START_RANGE_MS = { min: 82, max: 126 };
 const PEER_RESPONSE_END_RANGE_MS = { min: 214, max: 286 };
 const PEER_RESPONSE_CURVE_RANGE = { min: 0.88, max: 1.16 };
 const PEER_RESPONSE_JITTER_MS = 12;
 const PEER_RESPONSE_MIN_GAP_MS = 14;
-const PEER_INTERVALS = [7, 12, 19, 24, 12] as const;
+const NODE_VIEW_INTERVALS = [0, 7, 12, 19, 24, 31] as const;
 
 const NODE_VIEW_DELAY_BY_DENSITY: Record<AudioDensity, { min: number; max: number }> = {
   sparse: { min: 2800, max: 3600 },
   balanced: { min: 2200, max: 3000 },
-  rich: { min: 1800, max: 2400 }
+  rich: { min: 1800, max: 2400 },
 };
 
 export type PlannedPhraseStep = {
@@ -62,7 +72,10 @@ function buildPeerDelays(peerCount: number) {
     return [];
   }
 
-  const responseStart = randomInRange(PEER_RESPONSE_START_RANGE_MS.min, PEER_RESPONSE_START_RANGE_MS.max);
+  const responseStart = randomInRange(
+    PEER_RESPONSE_START_RANGE_MS.min,
+    PEER_RESPONSE_START_RANGE_MS.max
+  );
   const responseEnd = Math.max(
     responseStart + 76,
     randomInRange(PEER_RESPONSE_END_RANGE_MS.min, PEER_RESPONSE_END_RANGE_MS.max)
@@ -75,14 +88,21 @@ function buildPeerDelays(peerCount: number) {
     const curvedProgress = Math.pow(progress, responseCurve);
     const baseDelay = interpolate(responseStart, responseEnd, curvedProgress);
     const jitter = randomInRange(-PEER_RESPONSE_JITTER_MS, PEER_RESPONSE_JITTER_MS);
-    const delay = Math.round(Math.max(previousDelay + PEER_RESPONSE_MIN_GAP_MS, baseDelay + jitter));
+    const delay = Math.round(
+      Math.max(previousDelay + PEER_RESPONSE_MIN_GAP_MS, baseDelay + jitter)
+    );
     previousDelay = Math.min(delay, Math.round(responseEnd));
 
     return previousDelay;
   });
 }
 
-function resolvePeerIntensity(node: EchoNode, orbitDistance: number, minDistance: number, maxDistance: number) {
+function resolvePeerIntensity(
+  node: EchoNode,
+  orbitDistance: number,
+  minDistance: number,
+  maxDistance: number
+) {
   const spread = Math.max(0.001, maxDistance - minDistance);
   const normalizedDistance = (orbitDistance - minDistance) / spread;
   const proximity = 1 - normalizedDistance;
@@ -100,7 +120,7 @@ export function planNodeViewPhrase({
   selectedNodeId,
   root,
   registerBandMap,
-  phraseId
+  phraseId,
 }: PlanNodeViewPhraseInput): PlannedPhraseStep[] {
   const selectedNode = nodes.find((node) => node.id === selectedNodeId);
   if (!selectedNode) {
@@ -109,11 +129,16 @@ export function planNodeViewPhrase({
 
   const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
   const layoutSeed = getNodeViewLayoutSeed(selectedNode.id);
-  const sortedPeerOrbits = sortNodeViewPeerOrbits(getNodeViewPeerOrbits(selectedNode, peers, layoutSeed)).slice(0, MAX_NODE_VIEW_PEERS);
+  const sortedPeerOrbits = sortNodeViewPeerOrbits(
+    getNodeViewPeerOrbits(selectedNode, peers, layoutSeed)
+  );
   const peerDelays = buildPeerDelays(sortedPeerOrbits.length);
   const voiceCount = 1 + sortedPeerOrbits.length;
   const minDistance = Math.min(...sortedPeerOrbits.map((entry) => entry.orbitDistance), 0.82);
-  const maxDistance = Math.max(...sortedPeerOrbits.map((entry) => entry.orbitDistance), minDistance);
+  const maxDistance = Math.max(
+    ...sortedPeerOrbits.map((entry) => entry.orbitDistance),
+    minDistance
+  );
   const centerRegisterBand = registerBandMap.get(selectedNode.id) ?? 1;
   const steps: PlannedPhraseStep[] = [
     {
@@ -127,12 +152,12 @@ export function planNodeViewPhrase({
         voiceIndex: 0,
         voiceCount,
         registerBand: centerRegisterBand,
-        degreeHint: resolveNodeViewDegree(root, 0),
+        degreeHint: resolveNodeViewDegree(root, NODE_VIEW_INTERVALS[0]),
         batchId: phraseId,
         batchRole: "lead",
-        source: "resonance"
-      }
-    }
+        source: "resonance",
+      },
+    },
   ];
 
   sortedPeerOrbits.forEach((entry, index) => {
@@ -151,11 +176,14 @@ export function planNodeViewPhrase({
         voiceIndex,
         voiceCount,
         registerBand,
-        degreeHint: resolveNodeViewDegree(root, PEER_INTERVALS[index] ?? 12),
+        degreeHint: resolveNodeViewDegree(
+          root,
+          NODE_VIEW_INTERVALS[1 + (index % (NODE_VIEW_INTERVALS.length - 1))]
+        ),
         batchId: phraseId,
         batchRole: getBatchRole(voiceIndex, voiceCount),
-        source: "resonance"
-      }
+        source: "resonance",
+      },
     });
   });
 

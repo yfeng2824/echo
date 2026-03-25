@@ -13,7 +13,7 @@ function parseLocationPath(): SceneRouteState {
   if (normalizedPath === "/") {
     return {
       scene: "map",
-      nodeId: null
+      nodeId: null,
     };
   }
 
@@ -23,13 +23,13 @@ function parseLocationPath(): SceneRouteState {
 
     return {
       scene: "node",
-      nodeId: nodeId || null
+      nodeId: nodeId || null,
     };
   }
 
   return {
     scene: "map",
-    nodeId: null
+    nodeId: null,
   };
 }
 

@@ -1,6 +1,12 @@
 import { CanvasSource, Container, Graphics, Sprite, Text, TextStyle, Texture } from "pixi.js";
-import type { EchoEvent, EchoNode } from "@echo/contracts";
-import type { CollisionBurst, RenderCallbacks, RenderContext, RenderSnapshot, VisualProfile } from "./pixi-types";
+import type { EchoChannel, EchoEvent, EchoNode } from "@echo/contracts";
+import type {
+  CollisionBurst,
+  RenderCallbacks,
+  RenderContext,
+  RenderSnapshot,
+  VisualProfile,
+} from "./pixi-types";
 import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer";
 import { getDisplayNodeId } from "../../lib/node-id";
 import { getNodeViewPeerOrbits } from "../../lib/node-view-layout";
@@ -41,8 +47,8 @@ export function createNodeSceneLayer() {
   const mapSprite = new Sprite(
     new Texture({
       source: new CanvasSource({
-        resource: mapCanvas
-      })
+        resource: mapCanvas,
+      }),
     })
   );
   const lineGraphics = new Graphics();
@@ -55,8 +61,8 @@ export function createNodeSceneLayer() {
       fontFamily: "Inter, sans-serif",
       fontSize: 10,
       fill: 0xffffff,
-      letterSpacing: 0.3
-    })
+      letterSpacing: 0.3,
+    }),
   });
 
   label.visible = false;
@@ -75,7 +81,7 @@ export function createNodeSceneLayer() {
     rippleGraphics,
     nodeGraphics,
     burstGraphics,
-    label
+    label,
   } satisfies NodeSceneLayer;
 }
 
@@ -106,11 +112,60 @@ function getNodeEvents(events: EchoEvent[], nodeId: string) {
   return events.filter((event) => event.nodeId === nodeId);
 }
 
+function getVisibleNodeEvents(
+  events: EchoEvent[],
+  nodeId: string,
+  context: RenderContext,
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
+) {
+  const nodeEvents = getNodeEvents(events, nodeId);
+  const activePriorityEvents = nodeEvents.filter((event) => {
+    if (event.type === "node_active") {
+      return false;
+    }
+
+    const profile = getVisualProfile(event, "node");
+    const age = context.now - new Date(event.at).getTime();
+    return age >= 0 && age <= profile.duration;
+  });
+
+  return activePriorityEvents.length > 0 ? activePriorityEvents : nodeEvents;
+}
+
+function getActiveChannelHighlights(
+  events: EchoEvent[],
+  context: RenderContext,
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
+) {
+  const activeHighlights = new Map<string, number>();
+
+  events.forEach((event) => {
+    if (!event.channelId) {
+      return;
+    }
+
+    const profile = getVisualProfile(event, "node");
+    const age = context.now - new Date(event.at).getTime();
+    if (age < 0 || age > profile.duration) {
+      return;
+    }
+
+    const energy = (1 - age / profile.duration) * Math.max(0.12, event.intensity);
+    activeHighlights.set(
+      event.channelId,
+      Math.max(activeHighlights.get(event.channelId) ?? 0, energy)
+    );
+  });
+
+  return activeHighlights;
+}
+
 function buildNodeLayout(
   nodes: EchoNode[],
   selectedNodeId: string,
   recentEvents: EchoEvent[],
   context: RenderContext,
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile,
   localLayoutSeed: number,
   entryEase: number,
   peerEntryEase: number
@@ -126,8 +181,10 @@ function buildNodeLayout(
   const centerY = Math.round(height / 2);
   const baseRadius = Math.min(width, height) * 0.31;
   const layout = new Map<string, NodeLayoutPoint>();
-  const selectedMapPosition =
-    context.projection.project(selectedNode.lng, selectedNode.lat) ?? { x: centerX, y: centerY };
+  const selectedMapPosition = context.projection.project(selectedNode.lng, selectedNode.lat) ?? {
+    x: centerX,
+    y: centerY,
+  };
   const anchorX = Math.round(selectedMapPosition.x + (centerX - selectedMapPosition.x) * entryEase);
   const anchorY = Math.round(selectedMapPosition.y + (centerY - selectedMapPosition.y) * entryEase);
 
@@ -135,7 +192,7 @@ function buildNodeLayout(
     x: anchorX,
     y: anchorY,
     size: 3 + entryEase * 5,
-    events: getNodeEvents(recentEvents, selectedNode.id)
+    events: getVisibleNodeEvents(recentEvents, selectedNode.id, context, getVisualProfile),
   });
 
   const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
@@ -150,7 +207,7 @@ function buildNodeLayout(
       x,
       y,
       size: 4,
-      events: getNodeEvents(recentEvents, peer.id)
+      events: getVisibleNodeEvents(recentEvents, peer.id, context, getVisualProfile),
     });
   });
 
@@ -159,7 +216,7 @@ function buildNodeLayout(
     peers: peerOrbits.map((entry) => entry.node),
     layout,
     anchorX,
-    anchorY
+    anchorY,
   };
 }
 
@@ -176,21 +233,25 @@ function getNodeSceneTransitionEase(
   return easeOutCubic(progress);
 }
 
-function blendNodePoint(previous: NodeLayoutPoint | null, target: NodeLayoutPoint | null, transitionEase: number) {
+function blendNodePoint(
+  previous: NodeLayoutPoint | null,
+  target: NodeLayoutPoint | null,
+  transitionEase: number
+) {
   if (previous && target) {
     return {
       x: previous.x + (target.x - previous.x) * transitionEase,
       y: previous.y + (target.y - previous.y) * transitionEase,
       size: previous.size + (target.size - previous.size) * transitionEase,
       events: target.events,
-      visibility: 0.45 + transitionEase * 0.55
+      visibility: 0.45 + transitionEase * 0.55,
     };
   }
 
   if (target) {
     return {
       ...target,
-      visibility: Math.max(0.2, transitionEase)
+      visibility: Math.max(0.2, transitionEase),
     };
   }
 
@@ -201,7 +262,7 @@ function blendNodePoint(previous: NodeLayoutPoint | null, target: NodeLayoutPoin
   return {
     ...previous,
     events: [],
-    visibility: 1 - transitionEase
+    visibility: 1 - transitionEase,
   };
 }
 
@@ -284,6 +345,7 @@ export function findNodeScenePeerAtPoint(
     selectedNodeId,
     snapshot.recentEvents,
     context,
+    () => ({ duration: 0, radius: 0, alpha: 0, halo: 0 }),
     localLayoutSeed,
     entryEase,
     peerEntryEase
@@ -317,6 +379,7 @@ export function renderNodeScene(
   maxRippleLayer: number
 ) {
   const { nodes, selectedNodeId, recentEvents, nodeSceneEnteredAt } = snapshot;
+  const channels = snapshot.channels;
   const selectedNode = nodes.find((node) => node.id === selectedNodeId) ?? nodes[0];
 
   layer.root.visible = true;
@@ -341,6 +404,7 @@ export function renderNodeScene(
     selectedNode.id,
     recentEvents,
     context,
+    getVisualProfile,
     localLayoutSeed,
     entryEase,
     peerEntryEase
@@ -358,6 +422,7 @@ export function renderNodeScene(
           nodeTransition.fromNodeId,
           recentEvents,
           context,
+          getVisualProfile,
           localLayoutSeed,
           entryEase,
           peerEntryEase
@@ -377,6 +442,11 @@ export function renderNodeScene(
     intensity: number;
     rippleLayer: number;
   }> = [];
+  const activeChannelHighlights = getActiveChannelHighlights(
+    recentEvents,
+    context,
+    getVisualProfile
+  );
 
   if (previousLayout && transitionEase < 1) {
     previousLayout.peers.forEach((peer) => {
@@ -390,7 +460,7 @@ export function renderNodeScene(
       layer.lineGraphics.stroke({
         color: 0xffffff,
         alpha: lineEntryEase * 0.1 * (1 - transitionEase),
-        width: 1
+        width: 1,
       });
     });
   }
@@ -401,12 +471,24 @@ export function renderNodeScene(
       return;
     }
 
+    const channel = channels.find(
+      (candidate) =>
+        (candidate.sourceNodeId === targetLayout.selectedNode.id &&
+          candidate.targetNodeId === peer.id) ||
+        (candidate.targetNodeId === targetLayout.selectedNode.id &&
+          candidate.sourceNodeId === peer.id)
+    );
+    const highlightEnergy = channel ? (activeChannelHighlights.get(channel.id) ?? 0) : 0;
+
     layer.lineGraphics.moveTo(targetLayout.anchorX, targetLayout.anchorY);
     layer.lineGraphics.lineTo(peerLayout.x, peerLayout.y);
     layer.lineGraphics.stroke({
       color: 0xffffff,
-      alpha: lineEntryEase * 0.1 * Math.max(transitionEase, 0.35),
-      width: 1
+      alpha:
+        lineEntryEase *
+        (0.1 * Math.max(transitionEase, 0.35) +
+          (highlightEnergy > 0 ? 0.12 + highlightEnergy * 0.42 : 0)),
+      width: 1 + highlightEnergy * 1.8,
     });
   });
 
@@ -443,7 +525,7 @@ export function renderNodeScene(
         return {
           event,
           progress: age / profile.duration,
-          profile
+          profile,
         };
       })
       .filter(Boolean) as Array<{ event: EchoEvent; progress: number; profile: VisualProfile }>;
@@ -457,11 +539,10 @@ export function renderNodeScene(
     const nodeEntryScale = isSelectedNode ? 0.8 + entryEase * 0.9 : 0.08 + peerEntryEase * 0.92;
     const hoverHaloBoost = isHoveredPeer ? 7 : 0;
     const hoverAlphaBoost = isHoveredPeer ? 0.12 : 0;
-    const haloSize =
-      isSelectedNode
-        ? (18 + pulse * 28 + Math.sin(context.time * 0.001 + index) * 2) * (0.95 + entryEase * 0.3)
-        : (11 + pulse * 14 + Math.sin(context.time * 0.001 + index) * 1.2) * nodeEntryScale +
-          hoverHaloBoost;
+    const haloSize = isSelectedNode
+      ? (18 + pulse * 28 + Math.sin(context.time * 0.001 + index) * 2) * (0.95 + entryEase * 0.3)
+      : (11 + pulse * 14 + Math.sin(context.time * 0.001 + index) * 1.2) * nodeEntryScale +
+        hoverHaloBoost;
 
     for (const ripple of activeNodeRipples) {
       const rippleRadius = 12 + ripple.progress * ripple.profile.radius;
@@ -475,14 +556,14 @@ export function renderNodeScene(
         y: point.y,
         radius: rippleRadius,
         intensity: ripple.event.intensity,
-        rippleLayer: ripple.event.rippleLayer ?? 0
+        rippleLayer: ripple.event.rippleLayer ?? 0,
       });
 
       layer.rippleGraphics.circle(point.x, point.y, rippleRadius);
       layer.rippleGraphics.stroke({
         color: 0xffffff,
         alpha: rippleAlpha * (isSelectedNode ? 1 : peerEntryEase),
-        width: isSelectedNode ? 2.4 : isHoveredPeer ? 2.2 : 1.8
+        width: isSelectedNode ? 2.4 : isHoveredPeer ? 2.2 : 1.8,
       });
     }
 
@@ -492,19 +573,22 @@ export function renderNodeScene(
       alpha:
         (isSelectedNode
           ? 0.05 + pulse * 0.12
-          : (0.025 + pulse * 0.075 + hoverAlphaBoost) * peerEntryEase) * point.visibility
+          : (0.025 + pulse * 0.075 + hoverAlphaBoost) * peerEntryEase) * point.visibility,
     });
 
     layer.nodeGraphics.circle(
       point.x,
       point.y,
-      ((isSelectedNode ? point.size + pulse * 2.4 : point.size + pulse + (isHoveredPeer ? 0.9 : 0)) *
+      ((isSelectedNode
+        ? point.size + pulse * 2.4
+        : point.size + pulse + (isHoveredPeer ? 0.9 : 0)) *
         nodeEntryScale) /
         (isSelectedNode ? 1 : 1 - Math.min(0.28, (1 - point.visibility) * 0.3))
     );
     layer.nodeGraphics.fill({
       color: 0xffffff,
-      alpha: (isSelectedNode ? 0.94 : (isHoveredPeer ? 0.98 : 0.9) * peerEntryEase) * point.visibility
+      alpha:
+        (isSelectedNode ? 0.94 : (isHoveredPeer ? 0.98 : 0.9) * peerEntryEase) * point.visibility,
     });
 
     if (isHoveredPeer) {
@@ -562,7 +646,7 @@ export function renderNodeScene(
         createdAt: context.now,
         radius: 12 + Math.max(leftRipple.intensity, rightRipple.intensity) * 18,
         leftNodeId: leftRipple.nodeId,
-        rightNodeId: rightRipple.nodeId
+        rightNodeId: rightRipple.nodeId,
       });
 
       const nextRippleLayer = Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1;

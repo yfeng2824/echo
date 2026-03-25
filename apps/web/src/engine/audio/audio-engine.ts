@@ -7,9 +7,14 @@ import type {
   EchoEventType,
   EchoNode,
   RegisterBand,
-  SceneId
+  SceneId,
 } from "@echo/contracts";
 import { getBandBaseOctave, resolvePentatonicByInterval } from "../../lib/pentatonic";
+import {
+  getNetworkMelodySpec,
+  isNetworkMelodyEventType,
+  resolveNetworkMelodyDegree,
+} from "../../lib/network-event-melody";
 
 type ActiveTransientVoice = {
   gain: GainNode;
@@ -20,39 +25,29 @@ type ActiveTransientVoice = {
   stop: () => void;
 };
 
-type MelodyStepSpec = {
-  delayMs: number;
-  interval: number;
-};
-
-type MelodySpec = {
-  baseOctave: number;
-  steps: MelodyStepSpec[];
-};
-
 const WEIGHTED_INTERVALS: Record<RegisterBand, Array<{ interval: number; weight: number }>> = {
   1: [
     { interval: 0, weight: 5 },
     { interval: 2, weight: 3 },
-    { interval: 7, weight: 4 }
+    { interval: 7, weight: 4 },
   ],
   2: [
     { interval: 0, weight: 4 },
     { interval: 2, weight: 3 },
     { interval: 4, weight: 2 },
-    { interval: 7, weight: 4 }
+    { interval: 7, weight: 4 },
   ],
   3: [
     { interval: 2, weight: 3 },
     { interval: 4, weight: 4 },
     { interval: 7, weight: 4 },
-    { interval: 9, weight: 3 }
+    { interval: 9, weight: 3 },
   ],
   4: [
     { interval: 4, weight: 4 },
     { interval: 7, weight: 5 },
-    { interval: 9, weight: 4 }
-  ]
+    { interval: 9, weight: 4 },
+  ],
 };
 
 const CHORD_PRIORITY_INTERVALS_BY_BAND: Record<RegisterBand, Record<number, number[]>> = {
@@ -60,26 +55,26 @@ const CHORD_PRIORITY_INTERVALS_BY_BAND: Record<RegisterBand, Record<number, numb
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 4, 7, 9]
+    4: [0, 4, 7, 9],
   },
   2: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 4, 7, 9]
+    4: [0, 4, 7, 9],
   },
   3: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 4, 7, 9]
+    4: [0, 4, 7, 9],
   },
   4: {
     1: [0],
     2: [0, 7],
     3: [0, 7, 9],
-    4: [0, 4, 7, 9]
-  }
+    4: [0, 4, 7, 9],
+  },
 };
 
 const ROOT_SEMITONE: Record<AudioRoot, number> = {
@@ -94,7 +89,7 @@ const ROOT_SEMITONE: Record<AudioRoot, number> = {
   "G#": 8,
   A: 9,
   "A#": 10,
-  B: 11
+  B: 11,
 };
 
 const COLLISION_INTENSITY_THRESHOLD = 0.2;
@@ -102,51 +97,6 @@ const COLLISION_VOICING_INTERVALS = [12, 19, 24, 19] as const;
 const NETWORK_MELODY_PRIORITY_CAP_MS = 1300;
 const NETWORK_MELODY_PRIORITY_FLOOR_MS = 900;
 const NETWORK_MELODY_TAIL_ALLOWANCE_MS = 520;
-const NETWORK_MELODY_BASE_OCTAVE: Record<Exclude<EchoEventType, "node_active">, number> = {
-  node_seen: 3,
-  channel_opened: 3,
-  channel_updated: 3,
-  payment_routed: 3,
-  path_used: 4,
-  region_activity_burst: 3
-};
-const NETWORK_MELODY_STEPS: Record<Exclude<EchoEventType, "node_active">, MelodyStepSpec[]> = {
-  node_seen: [
-    { delayMs: 0, interval: 0 },
-    { delayMs: 180, interval: 7 },
-    { delayMs: 390, interval: 12 }
-  ],
-  channel_opened: [
-    { delayMs: 0, interval: 0 },
-    { delayMs: 150, interval: 7 },
-    { delayMs: 320, interval: 12 },
-    { delayMs: 540, interval: 7 }
-  ],
-  channel_updated: [
-    { delayMs: 0, interval: 7 },
-    { delayMs: 190, interval: 0 },
-    { delayMs: 390, interval: 7 }
-  ],
-  payment_routed: [
-    { delayMs: 0, interval: 0 },
-    { delayMs: 130, interval: 2 },
-    { delayMs: 290, interval: 7 },
-    { delayMs: 500, interval: 12 }
-  ],
-  path_used: [
-    { delayMs: 0, interval: 12 },
-    { delayMs: 210, interval: 7 },
-    { delayMs: 440, interval: 0 }
-  ],
-  region_activity_burst: [
-    { delayMs: 0, interval: 0 },
-    { delayMs: 140, interval: 7 },
-    { delayMs: 300, interval: 12 },
-    { delayMs: 520, interval: 9 },
-    { delayMs: 760, interval: 12 }
-  ]
-};
-
 function hashString(value: string) {
   let hash = 0;
 
@@ -169,16 +119,15 @@ function isCollisionLikeResonanceEvent(event: EchoEvent) {
   );
 }
 
-function isNetworkMelodyEventType(eventType: EchoEventType): eventType is Exclude<EchoEventType, "node_active"> {
-  return eventType !== "node_active";
-}
-
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
   let audioContext: AudioContext | null = null;
   let ambientMaster: GainNode | null = null;
-  let ambientBedVoices: Array<{ oscillator: OscillatorNode; gain: GainNode; filter: BiquadFilterNode }> =
-    [];
+  let ambientBedVoices: Array<{
+    oscillator: OscillatorNode;
+    gain: GainNode;
+    filter: BiquadFilterNode;
+  }> = [];
   let topologyBands = new Map<string, RegisterBand>();
   let lastDegreeByNode = new Map<string, DegreeHint>();
   let activeTransientVoices: ActiveTransientVoice[] = [];
@@ -189,7 +138,7 @@ export function createAudioEngine(): AudioEngine {
   let settings: AudioSettings = {
     density: "balanced",
     timbrePreset: "standard",
-    root: "C"
+    root: "C",
   };
 
   const ensureAudioContext = async () => {
@@ -234,7 +183,7 @@ export function createAudioEngine(): AudioEngine {
   const getWeightedPitchesForBand = (band: RegisterBand) =>
     WEIGHTED_INTERVALS[band].map(({ interval, weight }) => ({
       degree: resolvePentatonicByInterval(settings.root, getBandBaseOctave(band), interval),
-      weight
+      weight,
     }));
 
   const getChordPriorityByBand = (band: RegisterBand, voiceCount: number) =>
@@ -244,13 +193,13 @@ export function createAudioEngine(): AudioEngine {
 
   const refreshTopologyBands = (nodes: EchoNode[]) => {
     const liveNodes = [...nodes].sort((left, right) => {
-        const degreeDelta = left.peers.length - right.peers.length;
-        if (degreeDelta !== 0) {
-          return degreeDelta;
-        }
+      const degreeDelta = left.peers.length - right.peers.length;
+      if (degreeDelta !== 0) {
+        return degreeDelta;
+      }
 
-        return left.id.localeCompare(right.id);
-      });
+      return left.id.localeCompare(right.id);
+    });
 
     topologyBands = new Map<string, RegisterBand>();
 
@@ -261,11 +210,13 @@ export function createAudioEngine(): AudioEngine {
     });
   };
 
-  const chooseWeightedDegree = (band: RegisterBand, nodeId: string, excludedDegrees: DegreeHint[]) => {
+  const chooseWeightedDegree = (
+    band: RegisterBand,
+    nodeId: string,
+    excludedDegrees: DegreeHint[]
+  ) => {
     const weightedPitches = getWeightedPitchesForBand(band);
-    const candidates = weightedPitches.filter(
-      ({ degree }) => !excludedDegrees.includes(degree)
-    );
+    const candidates = weightedPitches.filter(({ degree }) => !excludedDegrees.includes(degree));
     const pool = candidates.length > 0 ? candidates : weightedPitches;
     const lastDegree = lastDegreeByNode.get(nodeId);
     const filteredPool =
@@ -291,7 +242,9 @@ export function createAudioEngine(): AudioEngine {
 
     if (isCollisionLikeResonanceEvent(event)) {
       const collisionInterval =
-        COLLISION_VOICING_INTERVALS[Math.max(0, ((event.rippleLayer ?? 1) - 1) % COLLISION_VOICING_INTERVALS.length)];
+        COLLISION_VOICING_INTERVALS[
+          Math.max(0, ((event.rippleLayer ?? 1) - 1) % COLLISION_VOICING_INTERVALS.length)
+        ];
       const degree = resolvePentatonicByInterval(settings.root, 3, collisionInterval);
       lastDegreeByNode.set(event.nodeId, degree);
       return { degree, registerBand };
@@ -333,7 +286,7 @@ export function createAudioEngine(): AudioEngine {
       F: 5,
       G: 7,
       A: 9,
-      B: 11
+      B: 11,
     };
     const semitone = semitoneByNote[note] + (accidental === "#" ? 1 : 0);
     const midi = (octave + 1) * 12 + semitone;
@@ -355,25 +308,11 @@ export function createAudioEngine(): AudioEngine {
     return source === "ambient" || source === "resonance";
   };
 
-  const getNetworkMelodySpec = (event: EchoEvent): MelodySpec | null => {
-    if (!isNetworkMelodyEventType(event.type)) {
-      return null;
-    }
-
-    const registerBand = event.registerBand ?? topologyBands.get(event.nodeId) ?? 2;
-    const baseOctave = Math.min(
-      5,
-      Math.max(2, NETWORK_MELODY_BASE_OCTAVE[event.type] + (event.type === "payment_routed" || event.type === "path_used" ? Math.max(0, registerBand - 2) : 0))
-    );
-
-    return {
-      baseOctave,
-      steps: NETWORK_MELODY_STEPS[event.type]
-    };
-  };
-
   const playNetworkMelody = (event: EchoEvent) => {
-    const melodySpec = getNetworkMelodySpec(event);
+    const melodySpec = getNetworkMelodySpec(
+      event,
+      event.registerBand ?? topologyBands.get(event.nodeId) ?? 2
+    );
     if (!melodySpec || !enabled) {
       return;
     }
@@ -395,11 +334,19 @@ export function createAudioEngine(): AudioEngine {
         void playTransientVoice({
           ...event,
           at: new Date().toISOString(),
-          degreeHint: resolvePentatonicByInterval(settings.root, melodySpec.baseOctave, step.interval),
+          degreeHint: resolveNetworkMelodyDegree(
+            settings.root,
+            melodySpec.baseOctave,
+            step.interval
+          ),
           voiceIndex: index,
           voiceCount: melodySpec.steps.length,
-          batchRole: index === 0 ? "lead" : index === melodySpec.steps.length - 1 ? "tail" : "support",
-          intensity: Math.max(0.28, event.intensity * (index === 0 ? 1 : Math.max(0.48, 0.82 - index * 0.12)))
+          batchRole:
+            index === 0 ? "lead" : index === melodySpec.steps.length - 1 ? "tail" : "support",
+          intensity: Math.max(
+            0.28,
+            event.intensity * (index === 0 ? 1 : Math.max(0.48, 0.82 - index * 0.12))
+          ),
         });
       }, step.delayMs);
 
@@ -428,37 +375,12 @@ export function createAudioEngine(): AudioEngine {
     activeTransientVoices = activeTransientVoices.filter((voice) => voice.releaseAt > now);
   };
 
-  const getVoiceLimit = (source: EchoEvent["source"]) => {
-    if (source === "resonance") {
-      return 8;
-    }
-
-    return 3;
-  };
-
-  const allocateTransientSlot = (source: EchoEvent["source"], batchRole: EchoEvent["batchRole"], strength: number) => {
+  const allocateTransientSlot = (
+    source: EchoEvent["source"],
+    batchRole: EchoEvent["batchRole"],
+    strength: number
+  ) => {
     cleanupVoices();
-    const limit = getVoiceLimit(source);
-    const sourceVoices = activeTransientVoices.filter((voice) => voice.source === source);
-
-    if (sourceVoices.length < limit) {
-      return true;
-    }
-
-    const candidate = sourceVoices
-      .filter((voice) => voice.batchRole !== "lead")
-      .sort((left, right) => left.strength - right.strength)[0];
-
-    if (!candidate) {
-      return false;
-    }
-
-    if (candidate.strength > strength && batchRole !== "lead") {
-      return false;
-    }
-
-    candidate.stop();
-    activeTransientVoices = activeTransientVoices.filter((voice) => voice !== candidate);
     return true;
   };
 
@@ -508,10 +430,7 @@ export function createAudioEngine(): AudioEngine {
       settings.density === "rich" ? 1 : settings.density === "balanced" ? 0.8 : 0.6;
     const rootFrequency = getRootFrequency();
     const supportSemitone = averageIntensity > 0.58 ? 9 : 7;
-    const bedFrequencies = [
-      rootFrequency,
-      rootFrequency * Math.pow(2, supportSemitone / 12)
-    ];
+    const bedFrequencies = [rootFrequency, rootFrequency * Math.pow(2, supportSemitone / 12)];
 
     // The map bed stays to two quiet voices so discrete node triggers remain audible.
     ambientMaster = context.createGain();
@@ -572,7 +491,11 @@ export function createAudioEngine(): AudioEngine {
     const masterGain = context.createGain();
     const pluckOscillator = context.createOscillator();
     const bodyOscillator = context.createOscillator();
-    const airBuffer = context.createBuffer(1, Math.floor(context.sampleRate * 0.35), context.sampleRate);
+    const airBuffer = context.createBuffer(
+      1,
+      Math.floor(context.sampleRate * 0.35),
+      context.sampleRate
+    );
     const airSource = context.createBufferSource();
     const pluckFilter = context.createBiquadFilter();
     const bodyFilter = context.createBiquadFilter();
@@ -586,8 +509,18 @@ export function createAudioEngine(): AudioEngine {
     const attack = 0.008;
     const resonanceBodyDuration = batchRole === "lead" ? 0.42 : batchRole === "tail" ? 0.26 : 0.32;
     const resonanceTailDuration = batchRole === "lead" ? 2.2 : batchRole === "tail" ? 1.45 : 1.7;
-    const bodyDuration = isCollisionLike ? 0.12 : source === "resonance" ? resonanceBodyDuration : 0.32;
-    const tailDuration = isCollisionLike ? 1.45 : source === "resonance" ? resonanceTailDuration : source === "ambient" ? 1.7 : 2.1;
+    const bodyDuration = isCollisionLike
+      ? 0.12
+      : source === "resonance"
+        ? resonanceBodyDuration
+        : 0.32;
+    const tailDuration = isCollisionLike
+      ? 1.45
+      : source === "resonance"
+        ? resonanceTailDuration
+        : source === "ambient"
+          ? 1.7
+          : 2.1;
     const resonanceGainMultiplier = batchRole === "lead" ? 1.12 : batchRole === "tail" ? 0.7 : 0.84;
     const baseGain =
       (source === "resonance" ? 0.06 : 0.045) *
@@ -631,12 +564,18 @@ export function createAudioEngine(): AudioEngine {
     pluckGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? 0.08 : 0.16));
 
     bodyGain.gain.setValueAtTime(0.0001, now);
-    bodyGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.62 : 1), now + (isCollisionLike ? 0.015 : 0.03));
+    bodyGain.gain.linearRampToValueAtTime(
+      maxGain * (isCollisionLike ? 0.62 : 1),
+      now + (isCollisionLike ? 0.015 : 0.03)
+    );
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + bodyDuration + tailDuration);
 
     airGain.gain.setValueAtTime(0.0001, now);
     airGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.13 : 0.08), now + 0.06);
-    airGain.gain.exponentialRampToValueAtTime(0.0001, now + (isCollisionLike ? tailDuration : tailDuration));
+    airGain.gain.exponentialRampToValueAtTime(
+      0.0001,
+      now + (isCollisionLike ? tailDuration : tailDuration)
+    );
 
     pluckOscillator.connect(pluckFilter);
     pluckFilter.connect(pluckGain);
@@ -694,7 +633,7 @@ export function createAudioEngine(): AudioEngine {
       batchRole,
       strength,
       releaseAt: now + bodyDuration + tailDuration + 0.1,
-      stop
+      stop,
     });
 
     bodyOscillator.onended = () => {
@@ -783,6 +722,6 @@ export function createAudioEngine(): AudioEngine {
         audioContext.close().catch(() => undefined);
         audioContext = null;
       }
-    }
+    },
   };
 }

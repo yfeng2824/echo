@@ -27,20 +27,16 @@ const landFeature = feature(
   (landTopology as typeof landTopology).objects.land as never
 );
 
-export function createWorldMapProjection(
-  width: number,
-  height: number
-): WorldMapProjection {
+export function createWorldMapProjection(width: number, height: number): WorldMapProjection {
   const projection = geoNaturalEarth1();
-  const clamp = (value: number, min: number, max: number) =>
-    Math.max(min, Math.min(max, value));
+  const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value));
   const horizontalPadding = clamp(width * 0.045, 8, 64);
   const verticalPadding = clamp(height * 0.09, 20, 92);
 
   projection.fitExtent(
     [
       [horizontalPadding, verticalPadding],
-      [width - horizontalPadding, height - verticalPadding]
+      [width - horizontalPadding, height - verticalPadding],
     ],
     landFeature
   );
@@ -55,7 +51,7 @@ export function createWorldMapProjection(
       minX: min[0],
       minY: min[1],
       maxX: max[0],
-      maxY: max[1]
+      maxY: max[1],
     },
     project: (lng, lat) => {
       const point = projection([lng, lat]);
@@ -91,6 +87,6 @@ export function createWorldMapProjection(
       context.stroke();
 
       context.restore();
-    }
+    },
   };
 }

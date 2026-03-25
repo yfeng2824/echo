@@ -26,8 +26,9 @@ export class PixiSurface {
     mapSearchTransition: null,
     nodeSceneEnteredAt: null,
     nodes: [],
+    channels: [],
     selectedNodeId: null,
-    recentEvents: []
+    recentEvents: [],
   };
   private localLayoutSeed = 0;
   private hoveredNodeId: string | null = null;
@@ -60,7 +61,7 @@ export class PixiSurface {
       autoDensity: true,
       resolution: this.dpr,
       backgroundColor: 0x000000,
-      eventMode: "passive"
+      eventMode: "passive",
     });
 
     if (this.destroyed) {
@@ -111,7 +112,7 @@ export class PixiSurface {
         this.nodeSceneTransition = {
           fromNodeId,
           toNodeId,
-          startedAt: Date.now()
+          startedAt: Date.now(),
         };
       }
     } else if (nextSnapshot.activeScene !== "node") {
@@ -190,7 +191,7 @@ export class PixiSurface {
       width: this.width,
       height: this.height,
       dpr: this.dpr,
-      projection: this.projection
+      projection: this.projection,
     };
   }
 
@@ -217,15 +218,11 @@ export class PixiSurface {
     this.handlePointerMove = (event: PointerEvent) => {
       if (this.snapshot.activeScene !== "map") {
         if (this.snapshot.activeScene === "node") {
-          const peerNode = this.findPeerNodeAtPointer(
-            event.clientX,
-            event.clientY,
-            {
-              preferredNodeId: this.hoveredPeerNodeId,
-              hitRadius: 22,
-              stickiness: 10
-            }
-          );
+          const peerNode = this.findPeerNodeAtPointer(event.clientX, event.clientY, {
+            preferredNodeId: this.hoveredPeerNodeId,
+            hitRadius: 22,
+            stickiness: 10,
+          });
 
           this.hoveredPeerNodeId = peerNode?.id ?? null;
           this.app.canvas.style.cursor = peerNode ? "pointer" : "default";
@@ -246,7 +243,7 @@ export class PixiSurface {
         {
           preferredNodeId: this.hoveredNodeId,
           hitRadius: 16,
-          stickiness: 8
+          stickiness: 8,
         }
       );
 
@@ -257,13 +254,9 @@ export class PixiSurface {
     this.handleClick = (event: MouseEvent) => {
       if (this.snapshot.activeScene !== "map") {
         if (this.snapshot.activeScene === "node") {
-          const peerNode = this.findPeerNodeAtPointer(
-            event.clientX,
-            event.clientY,
-            {
-              hitRadius: 24
-            }
-          );
+          const peerNode = this.findPeerNodeAtPointer(event.clientX, event.clientY, {
+            hitRadius: 24,
+          });
 
           if (peerNode) {
             this.options.selectNode(peerNode.id);
@@ -278,7 +271,7 @@ export class PixiSurface {
         event.clientX,
         event.clientY,
         {
-          hitRadius: 18
+          hitRadius: 18,
         }
       );
 
@@ -319,7 +312,13 @@ export class PixiSurface {
     this.nodeLayer.root.visible = this.snapshot.activeScene === "node";
 
     if (this.snapshot.activeScene === "map") {
-      renderMapScene(this.mapLayer, this.snapshot, { hoveredNodeId: this.hoveredNodeId }, context, this.options.getVisualProfile);
+      renderMapScene(
+        this.mapLayer,
+        this.snapshot,
+        { hoveredNodeId: this.hoveredNodeId },
+        context,
+        this.options.getVisualProfile
+      );
       this.nodeLayer.root.visible = false;
       return;
     }
@@ -341,16 +340,18 @@ export class PixiSurface {
             type: "node_active",
             at: new Date().toISOString(),
             nodeId:
-              leftRipple.intensity >= rightRipple.intensity ? leftRipple.nodeId : rightRipple.nodeId,
+              leftRipple.intensity >= rightRipple.intensity
+                ? leftRipple.nodeId
+                : rightRipple.nodeId,
             intensity: 0.14,
             batchRole: "tail",
             source: "resonance",
-            rippleLayer: Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1
+            rippleLayer: Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1,
           };
 
           this.options.appendEvent(collisionEvent);
           this.options.triggerEvent(collisionEvent);
-        }
+        },
       },
       this.options.getVisualProfile,
       2

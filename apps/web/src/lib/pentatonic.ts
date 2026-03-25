@@ -2,7 +2,20 @@ import type { AudioRoot, DegreeHint, RegisterBand } from "@echo/contracts";
 
 export type ScaleDegreeKey = "root" | "second" | "third" | "fifth" | "sixth";
 
-export const ROOT_OPTIONS: AudioRoot[] = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+export const ROOT_OPTIONS: AudioRoot[] = [
+  "C",
+  "C#",
+  "D",
+  "D#",
+  "E",
+  "F",
+  "F#",
+  "G",
+  "G#",
+  "A",
+  "A#",
+  "B",
+];
 
 const ROOT_SEMITONE: Record<AudioRoot, number> = {
   C: 0,
@@ -16,7 +29,7 @@ const ROOT_SEMITONE: Record<AudioRoot, number> = {
   "G#": 8,
   A: 9,
   "A#": 10,
-  B: 11
+  B: 11,
 };
 
 const NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"] as const;
@@ -26,14 +39,18 @@ const DEGREE_INTERVALS: Record<ScaleDegreeKey, number> = {
   second: 2,
   third: 4,
   fifth: 7,
-  sixth: 9
+  sixth: 9,
 };
 
 export function getBandBaseOctave(registerBand: RegisterBand) {
   return registerBand + 1;
 }
 
-export function resolvePentatonicByInterval(root: AudioRoot, baseOctave: number, semitoneInterval: number): DegreeHint {
+export function resolvePentatonicByInterval(
+  root: AudioRoot,
+  baseOctave: number,
+  semitoneInterval: number
+): DegreeHint {
   const rootSemitone = ROOT_SEMITONE[root];
   const semitone = rootSemitone + semitoneInterval;
   const octaveShift = Math.floor(semitone / 12);
@@ -49,5 +66,9 @@ export function resolvePentatonicDegree(
   registerBand: RegisterBand,
   degree: ScaleDegreeKey
 ): DegreeHint {
-  return resolvePentatonicByInterval(root, getBandBaseOctave(registerBand), DEGREE_INTERVALS[degree]);
+  return resolvePentatonicByInterval(
+    root,
+    getBandBaseOctave(registerBand),
+    DEGREE_INTERVALS[degree]
+  );
 }

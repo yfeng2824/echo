@@ -18,7 +18,9 @@ function fnv1a(input: string) {
 
 function getDerivedHexNodeId(nodeId: string) {
   // Keep a hex fallback for peer-only nodes without changing internal graph keys.
-  const segments = Array.from({ length: 4 }, (_, salt) => fnv1a(`${nodeId}:${salt}`).toString(16).padStart(8, "0"));
+  const segments = Array.from({ length: 4 }, (_, salt) =>
+    fnv1a(`${nodeId}:${salt}`).toString(16).padStart(8, "0")
+  );
 
   return `0x${segments.join("")}`;
 }
