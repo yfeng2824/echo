@@ -1,4 +1,4 @@
-import type { EchoEvent, EchoNode, SceneId } from "@echo/contracts";
+import type { EchoChannel, EchoEvent, EchoNode, SceneId } from "@echo/contracts";
 import type { WorldMapProjection } from "../../lib/map-projection";
 
 export type MapSearchTransition = {
@@ -11,6 +11,7 @@ export type RenderSnapshot = {
   mapSearchTransition: MapSearchTransition;
   nodeSceneEnteredAt: number | null;
   nodes: EchoNode[];
+  channels: EchoChannel[];
   selectedNodeId: string | null;
   recentEvents: EchoEvent[];
 };
@@ -56,5 +57,9 @@ export type VisualProfile = {
 };
 
 export type RenderCallbacks = {
-  emitCollisionEcho: (leftRipple: NodeRipple, rightRipple: NodeRipple, collisionKey: string) => void;
+  emitCollisionEcho: (
+    leftRipple: NodeRipple,
+    rightRipple: NodeRipple,
+    collisionKey: string
+  ) => void;
 };

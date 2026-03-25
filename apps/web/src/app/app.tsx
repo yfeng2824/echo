@@ -1,18 +1,20 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   AudioDensity,
-  BatchRole,
   DegreeHint,
   EchoEvent,
+  EventFeed,
   EchoNode,
   HeadlineCounts,
   NetworkSimulation,
   RegisterBand,
-  SceneBootstrap
+  SceneBootstrap,
 } from "@echo/contracts";
 import { createAudioEngine } from "../engine/audio/audio-engine";
 import { createApiNetworkSimulation, fetchSceneBootstrap } from "../lib/api-client";
+import { getNetworkMelodySpec, isNetworkMelodyEventType } from "../lib/network-event-melody";
 import { buildRegisterBandMap } from "../lib/network";
+import { pickNodeViewPhraseDelay, planNodeViewPhrase } from "../lib/node-view-audio";
 import { resolvePentatonicDegree, type ScaleDegreeKey } from "../lib/pentatonic";
 import { useSceneRouting } from "../scenes/use-scene-routing";
 import { useAppStore } from "../state/app-store";
@@ -39,43 +41,37 @@ const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
   1: ["root"],
   2: ["root", "fifth"],
   3: ["root", "fifth", "sixth"],
-  4: ["root", "second", "fifth", "sixth"]
+  4: ["root", "second", "fifth", "sixth"],
 };
 
-const RESONANCE_PEER_DEGREES: ScaleDegreeKey[] = ["third", "fifth", "sixth", "third"];
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
+const NODE_VIEW_PHRASE_SETTLE_MS = 2400;
 const STARTUP_AUDIO_MUTE_MS = 1000;
 
 const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
   sparse: { min: 900, max: 1500 },
   balanced: { min: 700, max: 1200 },
-  rich: { min: 450, max: 900 }
-};
-
-const RESONANCE_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
-  sparse: { min: 2100, max: 3100 },
-  balanced: { min: 1750, max: 2600 },
-  rich: { min: 1400, max: 2100 }
+  rich: { min: 450, max: 900 },
 };
 
 const EMPTY_HEADLINE_COUNTS: HeadlineCounts = {
-  activeNodeCount: 0,
-  channelCount: 0
+  announcedNodeCount: 0,
+  channelCount: 0,
 };
 
 const EMPTY_BOOTSTRAP: SceneBootstrap = {
   nodes: [],
   channels: [],
   recentEvents: [],
-  headlineCounts: EMPTY_HEADLINE_COUNTS
+  headlineCounts: EMPTY_HEADLINE_COUNTS,
 };
 
 const SILENT_SIMULATION: NetworkSimulation = {
   start() {},
-  stop() {}
+  stop() {},
 };
 
-function getBatchRole(index: number, voiceCount: number): BatchRole {
+function getBatchRole(index: number, voiceCount: number): EchoEvent["batchRole"] {
   if (index === 0) {
     return "lead";
   }
@@ -117,14 +113,16 @@ function chooseAmbientBatchSize(density: AudioDensity) {
   return roll < 0.65 ? 1 : roll < 0.92 ? 2 : 3;
 }
 
-async function loadBootstrap(currentNetwork: AppStoreState["currentNetwork"]): Promise<BootstrapLoadResult> {
+async function loadBootstrap(
+  currentNetwork: AppStoreState["currentNetwork"]
+): Promise<BootstrapLoadResult> {
   try {
     const bootstrap = await fetchSceneBootstrap(currentNetwork);
 
     return {
       bootstrap,
       simulation: createApiNetworkSimulation(currentNetwork, bootstrap.recentEvents),
-      status: { state: "ready" }
+      status: { state: "ready" },
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Network bootstrap failed";
@@ -132,7 +130,7 @@ async function loadBootstrap(currentNetwork: AppStoreState["currentNetwork"]): P
     return {
       bootstrap: EMPTY_BOOTSTRAP,
       simulation: SILENT_SIMULATION,
-      status: { state: "unavailable", error: message }
+      status: { state: "unavailable", error: message },
     };
   }
 }
@@ -152,7 +150,7 @@ function enrichIncomingEvent(
     at: event.at ?? new Date().toISOString(),
     registerBand: event.registerBand ?? registerBandMap.get(event.nodeId) ?? 1,
     source: event.source ?? "network",
-    batchRole: event.batchRole ?? "support"
+    batchRole: event.batchRole ?? "support",
   };
 }
 
@@ -168,12 +166,10 @@ function shouldTriggerEventAudio(
     return false;
   }
 
-  if (event.type === "path_used") {
-    return true;
-  }
-
   const selectedNode = getSelectedNode(state);
-  return selectedNode ? event.nodeId === selectedNode.id || selectedNode.peers.includes(event.nodeId) : false;
+  return selectedNode
+    ? event.nodeId === selectedNode.id || selectedNode.peers.includes(event.nodeId)
+    : false;
 }
 
 function createAmbientEvent(
@@ -196,48 +192,14 @@ function createAmbientEvent(
     voiceIndex: index,
     voiceCount: batchSize,
     registerBand,
-    degreeHint: resolvePitchForBand(registerBand, root, AMBIENT_DEGREES[batchSize]?.[index] ?? "root"),
+    degreeHint: resolvePitchForBand(
+      registerBand,
+      root,
+      AMBIENT_DEGREES[batchSize]?.[index] ?? "root"
+    ),
     batchId,
     batchRole: getBatchRole(index, batchSize),
-    source: "ambient"
-  };
-}
-
-function createResonanceEvent(
-  node: EchoNode,
-  selectedNodeId: string,
-  index: number,
-  batchSize: number,
-  batchId: string,
-  timestamp: string,
-  registerBandMap: Map<string, RegisterBand>,
-  anchorDegree: DegreeHint,
-  root: AppStoreState["audioSettings"]["root"]
-): EchoEvent {
-  const isSelectedNode = node.id === selectedNodeId;
-  const registerBand = registerBandMap.get(node.id) ?? 1;
-
-  return {
-    id: `${batchId}-${index}-${node.id}`,
-    type: "node_active",
-    at: timestamp,
-    nodeId: node.id,
-    intensity: isSelectedNode
-      ? Math.min(1, 0.58 + node.intensity * 0.62)
-      : Math.min(0.86, 0.34 + node.intensity * 0.46),
-    voiceIndex: index,
-    voiceCount: batchSize,
-    registerBand,
-    degreeHint: isSelectedNode
-      ? anchorDegree
-      : resolvePitchForBand(
-          registerBand,
-          root,
-          RESONANCE_PEER_DEGREES[(index - 1 + RESONANCE_PEER_DEGREES.length) % RESONANCE_PEER_DEGREES.length]
-        ),
-    batchId,
-    batchRole: getBatchRole(index, batchSize),
-    source: "resonance"
+    source: "ambient",
   };
 }
 
@@ -251,6 +213,7 @@ export function App() {
 
   const initialize = useAppStore((state) => state.initialize);
   const appendEvent = useAppStore((state) => state.appendEvent);
+  const applyEventFeed = useAppStore((state) => state.applyEventFeed);
   const activeScene = useAppStore((state) => state.activeScene);
   const currentNetwork = useAppStore((state) => state.currentNetwork);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
@@ -271,15 +234,52 @@ export function App() {
     const audioEngine = audioRef.current;
     let cancelled = false;
     let simulation: NetworkSimulation | null = null;
+    const scheduledMelodyVisualTimeouts = new Set<number>();
 
-    const handleEvent = (event: EchoEvent) => {
+    const clearScheduledMelodyVisualTimeouts = () => {
+      scheduledMelodyVisualTimeouts.forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      scheduledMelodyVisualTimeouts.clear();
+    };
+
+    const handleFeed = (feed: EventFeed) => {
       const state = useAppStore.getState();
-      const enrichedEvent = enrichIncomingEvent(event, state);
+      const enrichedEvents = feed.events.map((event) => enrichIncomingEvent(event, state));
 
-      appendEvent(enrichedEvent);
-      if (shouldTriggerEventAudio(enrichedEvent, state)) {
-        audioEngine.trigger(enrichedEvent);
-      }
+      applyEventFeed({
+        events: enrichedEvents,
+        headlineCounts: feed.headlineCounts,
+      });
+
+      enrichedEvents.forEach((enrichedEvent) => {
+        if (isNetworkMelodyEventType(enrichedEvent.type)) {
+          const melodySpec = getNetworkMelodySpec(enrichedEvent, enrichedEvent.registerBand);
+
+          melodySpec?.steps.slice(1).forEach((step, index) => {
+            const timeoutId = window.setTimeout(() => {
+              scheduledMelodyVisualTimeouts.delete(timeoutId);
+              if (cancelled) {
+                return;
+              }
+
+              appendEvent({
+                ...enrichedEvent,
+                id: `${enrichedEvent.id}-visual-${index + 1}`,
+                at: new Date().toISOString(),
+                source: "resonance",
+                batchId: enrichedEvent.id,
+                batchRole: index === melodySpec.steps.length - 2 ? "tail" : "support",
+              });
+            }, step.delayMs);
+
+            scheduledMelodyVisualTimeouts.add(timeoutId);
+          });
+        }
+        if (shouldTriggerEventAudio(enrichedEvent, state)) {
+          audioEngine.trigger(enrichedEvent);
+        }
+      });
     };
 
     const bootstrap = async () => {
@@ -296,18 +296,19 @@ export function App() {
       initialize({
         simulation: result.simulation,
         audio: audioEngine,
-        ...result.bootstrap
+        ...result.bootstrap,
       });
-      result.simulation.start(handleEvent);
+      result.simulation.start(handleFeed);
     };
 
     void bootstrap();
 
     return () => {
       cancelled = true;
+      clearScheduledMelodyVisualTimeouts();
       simulation?.stop();
     };
-  }, [appendEvent, currentNetwork, initialize, setNetworkState]);
+  }, [appendEvent, applyEventFeed, currentNetwork, initialize, setNetworkState]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -340,7 +341,7 @@ export function App() {
     isSearchFocusPhase,
     networkTransitionVisible,
     nodes,
-    startupAudioReady
+    startupAudioReady,
   ]);
 
   useEffect(() => {
@@ -385,9 +386,13 @@ export function App() {
       nodeId: mapSearchTransition.nodeId,
       intensity: 0.96,
       registerBand: registerBandMap.get(mapSearchTransition.nodeId) ?? 1,
-      degreeHint: resolvePitchForBand(registerBandMap.get(mapSearchTransition.nodeId) ?? 1, audioSettings.root, "third"),
+      degreeHint: resolvePitchForBand(
+        registerBandMap.get(mapSearchTransition.nodeId) ?? 1,
+        audioSettings.root,
+        "third"
+      ),
       batchRole: "lead",
-      source: "network"
+      source: "network",
     };
 
     appendEvent(foundEvent);
@@ -476,7 +481,7 @@ export function App() {
     audioSettings.density,
     audioSettings.root,
     isSearchFocusPhase,
-    nodes
+    nodes,
   ]);
 
   useEffect(() => {
@@ -489,51 +494,83 @@ export function App() {
       return;
     }
 
-    const localNodes = [selectedNode, ...nodes.filter((node) => selectedNode.peers.includes(node.id))];
     const registerBandMap = buildRegisterBandMap(nodes);
-    const delayRange = RESONANCE_DELAY_BY_DENSITY[audioSettings.density];
     let timeoutId = 0;
+    let phraseHoldUntil = 0;
+    const scheduledStepTimeouts = new Set<number>();
 
-    const schedulePhrase = () => {
-      timeoutId = window.setTimeout(() => {
-        const timestamp = new Date().toISOString();
-        const batchId = `resonance-${Date.now()}`;
-        const selectedRegisterBand = registerBandMap.get(selectedNode.id) ?? 1;
-        const anchorDegree: DegreeHint =
-          Math.random() > 0.55
-            ? resolvePitchForBand(selectedRegisterBand, audioSettings.root, "root")
-            : resolvePitchForBand(selectedRegisterBand, audioSettings.root, "fifth");
+    const clearScheduledSteps = () => {
+      scheduledStepTimeouts.forEach((scheduledTimeoutId) => {
+        window.clearTimeout(scheduledTimeoutId);
+      });
+      scheduledStepTimeouts.clear();
+    };
 
-        // Fire the local field as one breath so audio and collision visuals stay aligned.
-        localNodes.forEach((node, index) => {
-          const event = createResonanceEvent(
-            node,
-            selectedNode.id,
-            index,
-            localNodes.length,
-            batchId,
-            timestamp,
-            registerBandMap,
-            anchorDegree,
-            audioSettings.root
-          );
+    const dispatchPhrase = () => {
+      const steps = planNodeViewPhrase({
+        nodes,
+        selectedNodeId: selectedNode.id,
+        root: audioSettings.root,
+        registerBandMap,
+        phraseId: `resonance-${Date.now()}`,
+      });
 
+      if (steps.length === 0) {
+        return;
+      }
+
+      phraseHoldUntil = Date.now() + NODE_VIEW_PHRASE_SETTLE_MS;
+      clearScheduledSteps();
+
+      steps.forEach((step) => {
+        const scheduledTimeoutId = window.setTimeout(() => {
+          scheduledStepTimeouts.delete(scheduledTimeoutId);
+
+          const event = {
+            ...step.event,
+            at: new Date().toISOString(),
+          };
           appendEvent(event);
           if (audioEnabled) {
             audio?.trigger(event);
           }
-        });
+        }, step.delayMs);
+
+        scheduledStepTimeouts.add(scheduledTimeoutId);
+      });
+    };
+
+    const schedulePhrase = (delayMs = pickNodeViewPhraseDelay(audioSettings.density)) => {
+      timeoutId = window.setTimeout(() => {
+        const now = Date.now();
+
+        if (now < phraseHoldUntil) {
+          schedulePhrase(Math.max(160, phraseHoldUntil - now));
+          return;
+        }
+
+        dispatchPhrase();
 
         schedulePhrase();
-      }, pickDelay(delayRange));
+      }, delayMs);
     };
 
     schedulePhrase();
 
     return () => {
       window.clearTimeout(timeoutId);
+      clearScheduledSteps();
     };
-  }, [activeScene, appendEvent, audio, audioEnabled, audioSettings.density, audioSettings.root, nodes, selectedNodeId]);
+  }, [
+    activeScene,
+    appendEvent,
+    audio,
+    audioEnabled,
+    audioSettings.density,
+    audioSettings.root,
+    nodes,
+    selectedNodeId,
+  ]);
 
   return <AppShell />;
 }

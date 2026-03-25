@@ -1,11 +1,4 @@
-export type EchoEventType =
-  | "node_seen"
-  | "channel_opened"
-  | "channel_updated"
-  | "payment_routed"
-  | "path_used"
-  | "node_active"
-  | "region_activity_burst";
+export type EchoEventType = "channel_opened" | "channel_closed" | "channel_updated" | "node_active";
 
 export type RegisterBand = 1 | 2 | 3 | 4;
 
@@ -23,6 +16,7 @@ export type EchoEvent = {
   type: EchoEventType;
   at: string;
   nodeId: string;
+  relatedNodeId?: string;
   channelId?: string;
   intensity: number;
   voiceIndex?: number;

@@ -2,8 +2,6 @@ export type SceneId = "map" | "node";
 
 export type EchoNetwork = "mainnet" | "testnet";
 
-export type EchoNodeStatus = "live" | "quiet";
-
 export type AudioDensity = "sparse" | "balanced" | "rich";
 
 export type AudioTimbrePreset = "standard";
@@ -24,7 +22,6 @@ export type EchoNode = {
   lat: number;
   lng: number;
   region: string;
-  status: EchoNodeStatus;
   intensity: number;
   peers: string[];
 };

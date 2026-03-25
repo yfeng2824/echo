@@ -9,6 +9,11 @@
   "scripts": {
     "dev": "npm run dev --workspace @echo/web",
     "dev:api": "npm run dev --workspace @echo/api",
-    "build": "npm run build --workspace @echo/web"
+    "build": "npm run build --workspace @echo/web",
+    "format": "prettier --write .",
+    "format:check": "prettier --check ."
+  },
+  "devDependencies": {
+    "prettier": "^3.6.2"
   }
 }

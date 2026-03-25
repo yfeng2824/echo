@@ -15,7 +15,7 @@ function getVisualProfile(event: EchoEvent, scene: "map" | "node") {
       duration,
       radius,
       alpha: 0.14 + baseIntensity * 0.2,
-      halo: 0.08 + baseIntensity * 0.12
+      halo: 0.08 + baseIntensity * 0.12,
     };
   }
 
@@ -44,7 +44,7 @@ function getVisualProfile(event: EchoEvent, scene: "map" | "node") {
     duration,
     radius,
     alpha,
-    halo: rippleLayer > 0 ? 0.04 + baseIntensity * 0.06 : 0.06 + baseIntensity * 0.12
+    halo: rippleLayer > 0 ? 0.04 + baseIntensity * 0.06 : 0.06 + baseIntensity * 0.12,
   };
 }
 
@@ -56,6 +56,7 @@ export function RenderSurface() {
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const nodeSceneEnteredAt = useAppStore((state) => state.nodeSceneEnteredAt);
   const nodes = useAppStore((state) => state.nodes);
+  const channels = useAppStore((state) => state.channels);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const recentEvents = useAppStore((state) => state.recentEvents);
   const selectNode = useAppStore((state) => state.selectNode);
@@ -74,7 +75,7 @@ export function RenderSurface() {
       selectNode,
       appendEvent,
       triggerEvent: (event) => audio?.trigger(event),
-      getVisualProfile
+      getVisualProfile,
     });
     surfaceRef.current = surface;
 
@@ -100,10 +101,19 @@ export function RenderSurface() {
       mapSearchTransition,
       nodeSceneEnteredAt,
       nodes,
+      channels,
       selectedNodeId,
-      recentEvents
+      recentEvents,
     });
-  }, [activeScene, mapSearchTransition, nodeSceneEnteredAt, nodes, selectedNodeId, recentEvents]);
+  }, [
+    activeScene,
+    mapSearchTransition,
+    nodeSceneEnteredAt,
+    nodes,
+    channels,
+    selectedNodeId,
+    recentEvents,
+  ]);
 
   return <div ref={mountRef} className="render-surface" aria-hidden="true" />;
 }

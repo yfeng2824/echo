@@ -23,7 +23,7 @@ function isTypingTarget(target: EventTarget | null) {
 }
 
 function getCountSummary(nodeCount: number, channelCount: number) {
-  return `${nodeCount} Announced ${nodeCount === 1 ? "Node" : "Nodes"} • ${channelCount} ${
+  return `${nodeCount} Announced ${nodeCount === 1 ? "Node" : "Nodes"} • ${channelCount} Active ${
     channelCount === 1 ? "Channel" : "Channels"
   }`;
 }
@@ -77,8 +77,7 @@ export function SceneChrome() {
   const [networkMenuVertical, setNetworkMenuVertical] = useState<"down" | "up">("down");
   const [networkMenuHorizontal, setNetworkMenuHorizontal] = useState<"end" | "start">("end");
 
-  const announcedNodeCount = nodes.length;
-  const { channelCount } = headlineCounts;
+  const { announcedNodeCount, channelCount } = headlineCounts;
   const countSummary = getCountSummary(announcedNodeCount, channelCount);
   const showCountSkeleton = networkStatus === "loading" || networkTransitionVisible;
   const isSearchLocked = activeScene === "map" && mapSearchTransition !== null;
@@ -204,7 +203,10 @@ export function SceneChrome() {
 
       let top = buttonRect.top - tooltipRect.height - spacing;
       if (top < viewportPadding) {
-        top = Math.min(buttonRect.bottom + spacing, window.innerHeight - tooltipRect.height - viewportPadding);
+        top = Math.min(
+          buttonRect.bottom + spacing,
+          window.innerHeight - tooltipRect.height - viewportPadding
+        );
       }
 
       setSoundTooltipStyle({ left: clampedLeft, top });
@@ -388,21 +390,21 @@ export function SceneChrome() {
       title: "No live echo detected",
       description: "Live network activity is not available right now.",
       buttonLabel: "Retry",
-      buttonAction: () => window.location.reload()
+      buttonAction: () => window.location.reload(),
     };
   } else if (invalidNodeRouteId) {
     overlayContent = {
       title: "Node not found",
       description: "This node link doesn't exist in the current network.",
       buttonLabel: "Back",
-      buttonAction: handleInvalidRouteBack
+      buttonAction: handleInvalidRouteBack,
     };
   } else if (searchState === "empty") {
     overlayContent = {
       title: "No echo found",
       description: "We couldn't find a matching node in the current network.",
       buttonLabel: "Back",
-      buttonAction: handleDismissEmptyState
+      buttonAction: handleDismissEmptyState,
     };
   }
 
@@ -415,7 +417,10 @@ export function SceneChrome() {
           </button>
           <div className="scene-chrome__meta-slot">
             {showCountSkeleton ? (
-              <div className="scene-chrome__meta-skeleton" aria-label="Loading node and channel counts" />
+              <div
+                className="scene-chrome__meta-skeleton"
+                aria-label="Loading node and channel counts"
+              />
             ) : (
               <div className="scene-chrome__meta">{countSummary}</div>
             )}
@@ -484,7 +489,7 @@ export function SceneChrome() {
                 soundTooltipStyle
                   ? {
                       left: `${soundTooltipStyle.left}px`,
-                      top: `${soundTooltipStyle.top}px`
+                      top: `${soundTooltipStyle.top}px`,
                     }
                   : undefined
               }
@@ -566,7 +571,11 @@ export function SceneChrome() {
             </span>
           </button>
           {mobileControlsMenuOpen ? (
-            <div className="scene-chrome__mobile-menu-panel" role="dialog" aria-label="Network and density controls">
+            <div
+              className="scene-chrome__mobile-menu-panel"
+              role="dialog"
+              aria-label="Network and density controls"
+            >
               <div className="scene-chrome__mobile-section">
                 <div className="audio-controls__label">Root</div>
                 <div className="scene-chrome__mobile-network-row scene-chrome__mobile-network-row--root">
@@ -756,7 +765,9 @@ export function SceneChrome() {
       {overlayContent ? (
         <div
           className={`scene__empty-overlay scene-chrome__empty-overlay ${
-            !isLiveDataUnavailable && emptyOverlayState === "closing" ? "scene__empty-overlay--closing" : ""
+            !isLiveDataUnavailable && emptyOverlayState === "closing"
+              ? "scene__empty-overlay--closing"
+              : ""
           }`}
           role="dialog"
           aria-modal="true"
@@ -764,7 +775,9 @@ export function SceneChrome() {
         >
           <div
             className={`scene__empty-state scene-chrome__empty-state ${
-              !isLiveDataUnavailable && emptyOverlayState === "closing" ? "scene__empty-state--closing" : ""
+              !isLiveDataUnavailable && emptyOverlayState === "closing"
+                ? "scene__empty-state--closing"
+                : ""
             }`}
           >
             <div className="scene__empty-mark" aria-hidden="true">

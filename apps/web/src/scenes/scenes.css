@@ -49,7 +49,9 @@
   z-index: 10;
   background: rgba(0, 0, 0, 0.72);
   backdrop-filter: blur(2px);
-  transition: background 0.72s ease, backdrop-filter 0.72s ease;
+  transition:
+    background 0.72s ease,
+    backdrop-filter 0.72s ease;
 }
 
 .scene__empty-overlay--closing {
@@ -134,7 +136,9 @@
   font-weight: 400;
   letter-spacing: 0.18em;
   text-transform: uppercase;
-  transition: opacity 0.24s ease, transform 0.24s ease;
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease;
 }
 
 .scene__empty-description {
@@ -145,12 +149,16 @@
   letter-spacing: 0.03em;
   overflow-wrap: anywhere;
   word-break: break-word;
-  transition: opacity 0.24s ease, transform 0.24s ease;
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease;
 }
 
 .scene__empty-dismiss {
   margin-top: 6px;
-  transition: opacity 0.24s ease, transform 0.24s ease;
+  transition:
+    opacity 0.24s ease,
+    transform 0.24s ease;
 }
 
 .scene__card {
@@ -183,6 +191,38 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.scene__card-label--with-tooltip {
+  display: inline-flex;
+  align-items: center;
+}
+
+.scene__card-label--hint {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+
+.scene__card-inline-tooltip {
+  position: fixed;
+  z-index: 3;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(0, 0, 0, 0.92);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 11px;
+  line-height: 1.2;
+  letter-spacing: 0.04em;
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.scene__card-inline-tooltip--floating {
+  opacity: 1;
+  pointer-events: none;
 }
 
 .scene__card-value {

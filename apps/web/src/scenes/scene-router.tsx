@@ -16,4 +16,3 @@ export function SceneRouter() {
 
   return <main>{scene}</main>;
 }
-

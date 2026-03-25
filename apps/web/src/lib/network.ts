@@ -3,18 +3,18 @@ import {
   getDisplayNodeId,
   getFullHexNodeId,
   getFullNodeId,
-  normalizePublicNodeId
+  normalizePublicNodeId,
 } from "./node-id";
 
 export function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBand> {
   const liveNodes = [...nodes].sort((left, right) => {
-      const degreeDelta = left.peers.length - right.peers.length;
-      if (degreeDelta !== 0) {
-        return degreeDelta;
-      }
+    const degreeDelta = left.peers.length - right.peers.length;
+    if (degreeDelta !== 0) {
+      return degreeDelta;
+    }
 
-      return left.id.localeCompare(right.id);
-    });
+    return left.id.localeCompare(right.id);
+  });
 
   const bandMap = new Map<string, RegisterBand>();
 
@@ -36,10 +36,18 @@ function getNodeSearchTerms(node: EchoNode) {
   const displayId = getDisplayNodeId(node).toLowerCase();
   const normalizedPublicIds = [
     fiberPubkey ? normalizePublicNodeId(fiberPubkey) : "",
-    normalizePublicNodeId(fullNodeId)
+    normalizePublicNodeId(fullNodeId),
   ];
 
-  return new Set([rawId, peerId, fiberPubkey, fullNodeId, fallbackHexId, displayId, ...normalizedPublicIds]);
+  return new Set([
+    rawId,
+    peerId,
+    fiberPubkey,
+    fullNodeId,
+    fallbackHexId,
+    displayId,
+    ...normalizedPublicIds,
+  ]);
 }
 
 export function findNodeByQuery(nodes: EchoNode[], query: string) {

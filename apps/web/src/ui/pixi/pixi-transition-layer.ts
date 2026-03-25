@@ -12,7 +12,7 @@ export function getMapSearchFocusState(startedAt: number | null, now: number) {
 
   return {
     progress,
-    easedFocus
+    easedFocus,
   };
 }
 
@@ -31,6 +31,6 @@ export function getNodeEntryState(enteredAt: number | null, now: number) {
     peerEntryEase,
     lineEntryProgress,
     lineEntryEase,
-    mapFade: 1 - entryEase
+    mapFade: 1 - entryEase,
   };
 }

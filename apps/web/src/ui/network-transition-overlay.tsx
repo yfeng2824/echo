@@ -14,7 +14,7 @@ function createOverlayState(network: string, phase: OverlayState["phase"]): Over
   return {
     key: Date.now(),
     network,
-    phase
+    phase,
   };
 }
 
@@ -57,7 +57,9 @@ export function NetworkTransitionOverlay() {
       return;
     }
 
-    setOverlayState((current) => (current ? createOverlayState(current.network, "settling") : current));
+    setOverlayState((current) =>
+      current ? createOverlayState(current.network, "settling") : current
+    );
     clearTimerRef.current = window.setTimeout(() => {
       setOverlayState(null);
       setNetworkTransitionVisible(false);
