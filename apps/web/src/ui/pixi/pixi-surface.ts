@@ -3,7 +3,7 @@ import type { EchoEvent } from "@echo/contracts";
 import { createWorldMapProjection, type WorldMapProjection } from "../../lib/map-projection";
 import { getNodeViewLayoutSeed } from "../../lib/node-view-layout";
 import { createMapSceneLayer, findMapNodeAtPoint, renderMapScene } from "./pixi-map-scene";
-import { createNodeSceneLayer, findNodeScenePeerAtPoint, renderNodeScene } from "./pixi-node-scene";
+import type { NodeSceneLayer } from "./pixi-node-scene";
 import type { CollisionBurst, RenderSnapshot, VisualProfile } from "./pixi-types";
 
 type PixiSurfaceOptions = {
@@ -14,12 +14,16 @@ type PixiSurfaceOptions = {
   getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile;
 };
 
+type NodeSceneModule = typeof import("./pixi-node-scene");
+
 export class PixiSurface {
   private readonly app = new Application();
   private readonly root = new Container();
   private readonly mapLayer = createMapSceneLayer();
-  private readonly nodeLayer = createNodeSceneLayer();
   private readonly collisionHistory = new Map<string, number>();
+  private nodeLayer: NodeSceneLayer | null = null;
+  private nodeSceneModule: NodeSceneModule | null = null;
+  private nodeSceneModulePromise: Promise<NodeSceneModule> | null = null;
   private collisionBursts: CollisionBurst[] = [];
   private snapshot: RenderSnapshot = {
     activeScene: "map",
@@ -74,7 +78,7 @@ export class PixiSurface {
 
     this.options.root.appendChild(this.app.canvas);
     this.app.canvas.className = "render-surface";
-    this.root.addChild(this.mapLayer.root, this.nodeLayer.root);
+    this.root.addChild(this.mapLayer.root);
     this.app.stage.addChild(this.root);
     this.syncViewportSize();
     this.bindPointerEvents();
@@ -130,6 +134,10 @@ export class PixiSurface {
     }
 
     this.snapshot = nextSnapshot;
+
+    if (nextSnapshot.activeScene === "node") {
+      void this.ensureNodeSceneModule();
+    }
   }
 
   destroy() {
@@ -195,6 +203,28 @@ export class PixiSurface {
     };
   }
 
+  private ensureNodeSceneModule() {
+    if (this.nodeSceneModule) {
+      return Promise.resolve(this.nodeSceneModule);
+    }
+
+    if (!this.nodeSceneModulePromise) {
+      this.nodeSceneModulePromise = import("./pixi-node-scene").then((module) => {
+        this.nodeSceneModule = module;
+
+        if (!this.destroyed && !this.nodeLayer) {
+          this.nodeLayer = module.createNodeSceneLayer();
+          this.nodeLayer.root.visible = this.snapshot.activeScene === "node";
+          this.root.addChild(this.nodeLayer.root);
+        }
+
+        return module;
+      });
+    }
+
+    return this.nodeSceneModulePromise;
+  }
+
   private findPeerNodeAtPointer(
     clientX: number,
     clientY: number,
@@ -204,7 +234,11 @@ export class PixiSurface {
       stickiness?: number;
     }
   ) {
-    return findNodeScenePeerAtPoint(
+    if (!this.nodeSceneModule) {
+      return null;
+    }
+
+    return this.nodeSceneModule.findNodeScenePeerAtPoint(
       this.snapshot,
       this.getRenderContext(),
       this.localLayoutSeed,
@@ -309,7 +343,9 @@ export class PixiSurface {
     const context = this.getRenderContext();
 
     this.mapLayer.root.visible = this.snapshot.activeScene === "map";
-    this.nodeLayer.root.visible = this.snapshot.activeScene === "node";
+    if (this.nodeLayer) {
+      this.nodeLayer.root.visible = this.snapshot.activeScene === "node";
+    }
 
     if (this.snapshot.activeScene === "map") {
       renderMapScene(
@@ -319,12 +355,21 @@ export class PixiSurface {
         context,
         this.options.getVisualProfile
       );
-      this.nodeLayer.root.visible = false;
+      if (this.nodeLayer) {
+        this.nodeLayer.root.visible = false;
+      }
+      return;
+    }
+
+    void this.ensureNodeSceneModule();
+
+    if (!this.nodeSceneModule || !this.nodeLayer) {
+      this.mapLayer.root.visible = false;
       return;
     }
 
     this.mapLayer.root.visible = false;
-    this.collisionBursts = renderNodeScene(
+    this.collisionBursts = this.nodeSceneModule.renderNodeScene(
       this.nodeLayer,
       this.snapshot,
       { hoveredPeerNodeId: this.hoveredPeerNodeId },

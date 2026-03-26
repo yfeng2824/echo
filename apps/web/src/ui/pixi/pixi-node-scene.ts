@@ -11,7 +11,7 @@ import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer"
 import { getDisplayNodeId } from "../../lib/node-id";
 import { getNodeViewPeerOrbits } from "../../lib/node-view-layout";
 
-type NodeSceneLayer = {
+export type NodeSceneLayer = {
   root: Container;
   mapSprite: Sprite;
   mapCanvas: HTMLCanvasElement;
