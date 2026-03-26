@@ -80,15 +80,17 @@
 
 .scene-chrome__title {
   margin: 0;
-  font-size: 13px;
-  font-weight: 400;
+  display: flex;
+  align-items: center;
   line-height: 1;
-  letter-spacing: 0.4em;
-  text-transform: uppercase;
   opacity: 0.9;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+}
+
+.scene-chrome__logo {
+  display: block;
+  width: 74px;
+  max-width: 100%;
+  height: auto;
 }
 
 .scene-chrome__meta {
@@ -257,6 +259,7 @@
   background: transparent;
   color: #fff;
   font: inherit;
+  font-weight: 500;
   letter-spacing: 0.1em;
 }
 
@@ -322,6 +325,14 @@
   white-space: nowrap;
 }
 
+.scene-chrome__tooltip-label {
+  font-weight: 400;
+}
+
+.scene-chrome__tooltip-value {
+  font-weight: 500;
+}
+
 .scene-chrome__mobile-menu {
   display: none;
   position: relative;
@@ -336,6 +347,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: transparent;
   color: #fff;
+  font-weight: 500;
   cursor: pointer;
   transition: border-color 0.2s ease;
 }
@@ -391,6 +403,7 @@
   background: transparent;
   color: rgba(255, 255, 255, 0.8);
   font: inherit;
+  font-weight: 500;
   font-size: 12px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -428,6 +441,7 @@
   background: transparent;
   color: #fff;
   font: inherit;
+  font-weight: 500;
   font-size: 12px;
   letter-spacing: 0.1em;
   line-height: var(--chrome-control-height, 32px);
@@ -509,6 +523,7 @@
   background: transparent;
   color: rgba(255, 255, 255, 0.78);
   font: inherit;
+  font-weight: 500;
   font-size: 12px;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -619,8 +634,7 @@
   }
 
   .scene-chrome__title {
-    font-size: 12px;
-    letter-spacing: 0.24em;
+    max-width: 64px;
   }
 
   .scene-chrome__meta {
@@ -651,8 +665,7 @@
 
 @media (max-width: 480px) {
   .scene-chrome__title {
-    font-size: 11px;
-    letter-spacing: 0.18em;
+    max-width: 56px;
   }
 
   .scene-chrome__meta {
