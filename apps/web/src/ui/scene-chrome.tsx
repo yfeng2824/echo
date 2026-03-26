@@ -413,7 +413,9 @@ export function SceneChrome() {
       <header className="scene-chrome scene-chrome--top-left">
         <div className="scene-chrome__title-group">
           <button className="scene-chrome__title-button" type="button" onClick={goToMap}>
-            <h1 className="scene-chrome__title">Echo</h1>
+            <h1 className="scene-chrome__title">
+              <img className="scene-chrome__logo" src="/echo-icon.svg" alt="Echo" />
+            </h1>
           </button>
           <div className="scene-chrome__meta-slot">
             {showCountSkeleton ? (
@@ -494,7 +496,8 @@ export function SceneChrome() {
                   : undefined
               }
             >
-              Press M to toggle sound
+              <span className="scene-chrome__tooltip-label">Shortcut: </span>
+              <span className="scene-chrome__tooltip-value">M</span>
             </div>
           ) : null}
         </div>

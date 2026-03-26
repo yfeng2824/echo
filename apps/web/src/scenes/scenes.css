@@ -185,6 +185,7 @@
 }
 
 .scene__card-label {
+  font-weight: 400;
   opacity: 0.4;
   text-transform: uppercase;
   letter-spacing: 0.1em;
@@ -220,12 +221,21 @@
   pointer-events: none;
 }
 
+.scene__card-inline-tooltip-label {
+  font-weight: 400;
+}
+
+.scene__card-inline-tooltip-value {
+  font-weight: 500;
+}
+
 .scene__card-inline-tooltip--floating {
   opacity: 1;
   pointer-events: none;
 }
 
 .scene__card-value {
+  font-weight: 500;
   opacity: 0.9;
   letter-spacing: 0.05em;
   text-align: right;
@@ -353,6 +363,7 @@
   gap: 1rem;
   cursor: pointer;
   font: inherit;
+  font-weight: 500;
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.12em;

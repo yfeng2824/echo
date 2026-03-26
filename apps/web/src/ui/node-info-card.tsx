@@ -158,7 +158,8 @@ export function NodeInfoCard({ node, channels, visible }: NodeInfoCardProps) {
           style={activeChannelsTooltipStyle ?? undefined}
           role="tooltip"
         >
-          Excluding closed channels
+          <span className="scene__card-inline-tooltip-label">Count: </span>
+          <span className="scene__card-inline-tooltip-value">Excludes closed channels</span>
         </span>
       ) : null}
     </div>
