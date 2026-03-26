@@ -507,7 +507,6 @@ export function SceneChrome() {
             type="button"
             aria-haspopup="listbox"
             aria-expanded={networkMenuOpen}
-            aria-label="Select network"
             onClick={() => {
               setNetworkMenuOpen((open) => !open);
               setDensityMenuOpen(false);
@@ -672,7 +671,6 @@ export function SceneChrome() {
             type="button"
             aria-haspopup="listbox"
             aria-expanded={rootMenuOpen}
-            aria-label="Select root note"
             onClick={() => {
               setRootMenuOpen((open) => !open);
               setDensityMenuOpen(false);
@@ -721,7 +719,6 @@ export function SceneChrome() {
             type="button"
             aria-haspopup="listbox"
             aria-expanded={densityMenuOpen}
-            aria-label="Select density"
             onClick={() => {
               setDensityMenuOpen((open) => !open);
               setRootMenuOpen(false);
