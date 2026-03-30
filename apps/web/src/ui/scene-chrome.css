@@ -565,6 +565,55 @@
   text-align: center;
 }
 
+.scene-chrome__secret-overlay {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  z-index: calc(var(--overlay-z, 30) - 1);
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.scene-chrome__secret-overlay.is-playing {
+  animation: scene-chrome-secret-prompt-fade 0.9s ease forwards;
+}
+
+.scene-chrome__secret-code {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(0, 0, 0, 0.24);
+  backdrop-filter: blur(4px);
+}
+
+.scene-chrome__secret-slot {
+  width: 46px;
+  height: 56px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255, 255, 255, 0.28);
+  font-size: 18px;
+  font-weight: 500;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition:
+    border-color 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease,
+    box-shadow 0.18s ease;
+}
+
+.scene-chrome__secret-slot.is-filled {
+  border-color: rgba(255, 255, 255, 0.9);
+  color: rgba(255, 255, 255, 0.98);
+  background: rgba(255, 255, 255, 0.06);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+}
+
 .scene-chrome__empty-overlay {
   z-index: var(--overlay-z, 30);
 }
@@ -580,6 +629,21 @@
 
   100% {
     background-position: -80% 0;
+  }
+}
+
+@keyframes scene-chrome-secret-prompt-fade {
+  0%,
+  55% {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+    filter: blur(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate(-50%, calc(-50% - 8px)) scale(0.98);
+    filter: blur(4px);
   }
 }
 
@@ -607,6 +671,17 @@
 
   .scene-chrome--bottom-left {
     display: none;
+  }
+
+  .scene-chrome__secret-code {
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .scene-chrome__secret-slot {
+    width: 40px;
+    height: 50px;
+    font-size: 16px;
   }
 }
 
@@ -661,6 +736,17 @@
     padding: 0 8px;
     font-size: 10px;
   }
+
+  .scene-chrome__secret-code {
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .scene-chrome__secret-slot {
+    width: 32px;
+    height: 42px;
+    font-size: 14px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -682,5 +768,16 @@
   .chrome-button {
     padding: 0 8px;
     font-size: 10px;
+  }
+
+  .scene-chrome__secret-code {
+    gap: 6px;
+    padding: 10px;
+  }
+
+  .scene-chrome__secret-slot {
+    width: 28px;
+    height: 38px;
+    font-size: 12px;
   }
 }

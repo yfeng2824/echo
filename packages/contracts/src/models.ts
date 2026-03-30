@@ -8,6 +8,21 @@ export type AudioTimbrePreset = "standard";
 
 export type AudioRoot = "C" | "C#" | "D" | "D#" | "E" | "F" | "F#" | "G" | "G#" | "A" | "A#" | "B";
 
+export type SecretCueWord = "echo" | "ckb" | "fiber";
+
+export type SecretCuePhase = "idle" | "typing" | "playing";
+
+export type SecretCueState = {
+  phase: SecretCuePhase;
+  word: SecretCueWord | null;
+  matchedText: string;
+  startedAt: number | null;
+  expiresAt: number | null;
+  promptCollapseAt: number | null;
+  promptReleaseAt: number | null;
+  promptHideAt: number | null;
+};
+
 export type AudioSettings = {
   density: AudioDensity;
   timbrePreset: AudioTimbrePreset;

@@ -8,6 +8,7 @@ import type {
   EchoNode,
   RegisterBand,
   SceneId,
+  SecretCueWord,
 } from "@echo/contracts";
 import { getBandBaseOctave, resolvePentatonicByInterval } from "../../lib/pentatonic";
 import {
@@ -15,6 +16,7 @@ import {
   isNetworkMelodyEventType,
   resolveNetworkMelodyDegree,
 } from "../../lib/network-event-melody";
+import { SECRET_CUE_DURATION_MS, SECRET_PULSE_TIMINGS_MS } from "../../lib/secret-cue";
 
 type ActiveTransientVoice = {
   gain: GainNode;
@@ -22,6 +24,7 @@ type ActiveTransientVoice = {
   batchRole: EchoEvent["batchRole"];
   strength: number;
   releaseAt: number;
+  isSecretCue: boolean;
   stop: () => void;
 };
 
@@ -97,6 +100,71 @@ const COLLISION_VOICING_INTERVALS = [12, 19, 24, 19] as const;
 const NETWORK_MELODY_PRIORITY_CAP_MS = 1300;
 const NETWORK_MELODY_PRIORITY_FLOOR_MS = 900;
 const NETWORK_MELODY_TAIL_ALLOWANCE_MS = 520;
+const AMBIENT_GAIN_MULTIPLIER = 1.45;
+const TRANSIENT_GAIN_MULTIPLIER = 1.4;
+
+const SECRET_PROGRESS_INTERVALS: Record<SecretCueWord, number[]> = {
+  echo: [0, 2, 7, 9],
+  ckb: [0, 7, 4],
+  fiber: [0, 4, 7, 2, 9],
+};
+
+const [SECRET_PULSE_ONE_MS, SECRET_PULSE_TWO_MS, SECRET_PULSE_THREE_MS] = SECRET_PULSE_TIMINGS_MS;
+
+const SECRET_CUE_SPECS: Record<
+  SecretCueWord,
+  {
+    baseOctave: number;
+    steps: Array<{
+      interval: number;
+      delayMs: number;
+      intensity: number;
+      batchRole: EchoEvent["batchRole"];
+    }>;
+  }
+> = {
+  echo: {
+    baseOctave: 4,
+    steps: [
+      { interval: 0, delayMs: 0, intensity: 0.22, batchRole: "support" },
+      { interval: 2, delayMs: 180, intensity: 0.24, batchRole: "support" },
+      { interval: 7, delayMs: SECRET_PULSE_ONE_MS - 140, intensity: 0.34, batchRole: "support" },
+      { interval: 12, delayMs: SECRET_PULSE_ONE_MS, intensity: 0.58, batchRole: "lead" },
+      { interval: 9, delayMs: SECRET_PULSE_TWO_MS - 150, intensity: 0.3, batchRole: "support" },
+      { interval: 16, delayMs: SECRET_PULSE_TWO_MS, intensity: 0.48, batchRole: "support" },
+      { interval: 19, delayMs: SECRET_PULSE_THREE_MS - 120, intensity: 0.34, batchRole: "support" },
+      { interval: 12, delayMs: SECRET_PULSE_THREE_MS, intensity: 0.62, batchRole: "tail" },
+    ],
+  },
+  ckb: {
+    baseOctave: 3,
+    steps: [
+      { interval: 7, delayMs: 0, intensity: 0.22, batchRole: "support" },
+      { interval: 4, delayMs: 200, intensity: 0.24, batchRole: "support" },
+      { interval: 0, delayMs: SECRET_PULSE_ONE_MS - 130, intensity: 0.32, batchRole: "support" },
+      { interval: 7, delayMs: SECRET_PULSE_ONE_MS, intensity: 0.56, batchRole: "lead" },
+      { interval: 4, delayMs: SECRET_PULSE_TWO_MS - 160, intensity: 0.28, batchRole: "support" },
+      { interval: 9, delayMs: SECRET_PULSE_TWO_MS, intensity: 0.48, batchRole: "support" },
+      { interval: 2, delayMs: SECRET_PULSE_THREE_MS - 120, intensity: 0.32, batchRole: "support" },
+      { interval: 0, delayMs: SECRET_PULSE_THREE_MS, intensity: 0.6, batchRole: "tail" },
+    ],
+  },
+  fiber: {
+    baseOctave: 4,
+    steps: [
+      { interval: 0, delayMs: 0, intensity: 0.2, batchRole: "support" },
+      { interval: 4, delayMs: 150, intensity: 0.22, batchRole: "support" },
+      { interval: 7, delayMs: 340, intensity: 0.24, batchRole: "support" },
+      { interval: 12, delayMs: SECRET_PULSE_ONE_MS, intensity: 0.52, batchRole: "lead" },
+      { interval: 14, delayMs: SECRET_PULSE_TWO_MS - 220, intensity: 0.28, batchRole: "support" },
+      { interval: 16, delayMs: SECRET_PULSE_TWO_MS - 80, intensity: 0.34, batchRole: "support" },
+      { interval: 19, delayMs: SECRET_PULSE_TWO_MS, intensity: 0.46, batchRole: "support" },
+      { interval: 21, delayMs: SECRET_PULSE_THREE_MS - 180, intensity: 0.32, batchRole: "support" },
+      { interval: 19, delayMs: SECRET_PULSE_THREE_MS, intensity: 0.6, batchRole: "tail" },
+    ],
+  },
+};
+
 function hashString(value: string) {
   let hash = 0;
 
@@ -119,6 +187,10 @@ function isCollisionLikeResonanceEvent(event: EchoEvent) {
   );
 }
 
+function isSecretCueEvent(event: EchoEvent) {
+  return event.nodeId.startsWith("secret-");
+}
+
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
   let audioContext: AudioContext | null = null;
@@ -135,6 +207,11 @@ export function createAudioEngine(): AudioEngine {
   let networkMelodyTimeoutIds = new Set<number>();
   let networkMelodyPendingEvent: EchoEvent | null = null;
   let networkMelodyDrainTimeoutId: number | null = null;
+  let secretCueTimeoutIds = new Set<number>();
+  let secretCueReleaseTimeoutId: number | null = null;
+  let secretCueActiveUntil = 0;
+  let lastAmbientScene: SceneId = "map";
+  let lastAmbientNodes: EchoNode[] = [];
   let settings: AudioSettings = {
     density: "balanced",
     timbrePreset: "standard",
@@ -178,6 +255,61 @@ export function createAudioEngine(): AudioEngine {
     clearNetworkMelodyTimers();
     networkMelodyActiveUntil = 0;
     networkMelodyPendingEvent = null;
+  };
+
+  const clearSecretCueTimers = () => {
+    secretCueTimeoutIds.forEach((timeoutId) => {
+      window.clearTimeout(timeoutId);
+    });
+    secretCueTimeoutIds.clear();
+
+    if (secretCueReleaseTimeoutId !== null) {
+      window.clearTimeout(secretCueReleaseTimeoutId);
+      secretCueReleaseTimeoutId = null;
+    }
+  };
+
+  const isSecretCueActive = () => Date.now() < secretCueActiveUntil;
+
+  const stopTransientVoices = (
+    release = 0.08,
+    shouldStop: (voice: ActiveTransientVoice) => boolean = () => true
+  ) => {
+    cleanupVoices();
+    if (!audioContext) {
+      activeTransientVoices = activeTransientVoices.filter((voice) => !shouldStop(voice));
+      return;
+    }
+
+    const now = audioContext.currentTime;
+    const voicesToStop = activeTransientVoices.filter(shouldStop);
+    activeTransientVoices = activeTransientVoices.filter((voice) => !shouldStop(voice));
+
+    voicesToStop.forEach((voice) => {
+      voice.gain.gain.cancelScheduledValues(now);
+      voice.gain.gain.setTargetAtTime(0.0001, now, release);
+      voice.stop();
+    });
+  };
+
+  const stopActiveSecretCue = () => {
+    clearSecretCueTimers();
+    secretCueActiveUntil = 0;
+    stopTransientVoices(0.05, (voice) => voice.isSecretCue);
+    resumeAmbientIfNeeded();
+  };
+
+  const resumeAmbientIfNeeded = () => {
+    if (!enabled || isSecretCueActive()) {
+      return;
+    }
+
+    if (lastAmbientScene === "map") {
+      void startAmbient(lastAmbientNodes);
+      return;
+    }
+
+    stopAmbient(0.25);
   };
 
   const getWeightedPitchesForBand = (band: RegisterBand) =>
@@ -277,6 +409,10 @@ export function createAudioEngine(): AudioEngine {
 
   const getFrequency = (event: EchoEvent) => {
     const { degree } = resolveDegree(event);
+    return degreeToFrequency(degree);
+  };
+
+  const degreeToFrequency = (degree: DegreeHint) => {
     const [, note, accidental, octaveText] = degree.match(/^([A-G])(#{0,1})(\d)$/) ?? [];
     const octave = Number(octaveText);
     const semitoneByNote: Record<string, number> = {
@@ -293,6 +429,28 @@ export function createAudioEngine(): AudioEngine {
 
     return 440 * Math.pow(2, (midi - 69) / 12);
   };
+
+  const createSecretAudioEvent = (
+    word: SecretCueWord,
+    degreeHint: DegreeHint,
+    intensity: number,
+    batchRole: EchoEvent["batchRole"],
+    voiceIndex: number,
+    voiceCount: number
+  ): EchoEvent => ({
+    id: `secret-${word}-${voiceIndex}-${Date.now()}`,
+    type: "node_active",
+    at: new Date().toISOString(),
+    nodeId: `secret-${word}`,
+    intensity,
+    degreeHint,
+    voiceIndex,
+    voiceCount,
+    registerBand: 3,
+    batchId: `secret-${word}-${Math.floor(Date.now() / 120)}`,
+    batchRole,
+    source: "resonance",
+  });
 
   const shouldSuppressNodeActive = (event: EchoEvent) => {
     if (event.type !== "node_active") {
@@ -454,7 +612,10 @@ export function createAudioEngine(): AudioEngine {
       );
       filter.Q.setValueAtTime(0.6, context.currentTime);
 
-      gain.gain.setValueAtTime(baseGain * densityBoost, context.currentTime);
+      gain.gain.setValueAtTime(
+        baseGain * densityBoost * AMBIENT_GAIN_MULTIPLIER,
+        context.currentTime
+      );
 
       oscillator.connect(filter);
       filter.connect(gain);
@@ -464,10 +625,9 @@ export function createAudioEngine(): AudioEngine {
       return { oscillator, gain, filter };
     });
 
-    const targetMasterGain = Math.min(
-      0.045,
-      0.014 + (liveNodes.length / 24) * 0.012 + averageIntensity * 0.01
-    );
+    const targetMasterGain =
+      Math.min(0.045, 0.014 + (liveNodes.length / 24) * 0.012 + averageIntensity * 0.01) *
+      AMBIENT_GAIN_MULTIPLIER;
     ambientMaster.gain.linearRampToValueAtTime(targetMasterGain, context.currentTime + 1.1);
   };
 
@@ -481,6 +641,7 @@ export function createAudioEngine(): AudioEngine {
     const now = context.currentTime;
     const source = event.source ?? "network";
     const batchRole = event.batchRole ?? "support";
+    const isSecretCueVoice = isSecretCueEvent(event);
     const isCollisionLike = isCollisionLikeResonanceEvent(event);
     const strength = event.intensity + (batchRole === "lead" ? 0.2 : 0);
 
@@ -526,7 +687,7 @@ export function createAudioEngine(): AudioEngine {
       (source === "resonance" ? 0.06 : 0.045) *
       (source === "resonance" ? resonanceGainMultiplier : batchRole === "lead" ? 1.15 : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
-    const maxGain = baseGain * (isCollisionLike ? 0.6 : 1);
+    const maxGain = baseGain * (isCollisionLike ? 0.6 : 1) * TRANSIENT_GAIN_MULTIPLIER;
 
     // Blend a short pluck, a resonant body, and a faint airy tail for the default voice.
     const data = airBuffer.getChannelData(0);
@@ -633,6 +794,7 @@ export function createAudioEngine(): AudioEngine {
       batchRole,
       strength,
       releaseAt: now + bodyDuration + tailDuration + 0.1,
+      isSecretCue: isSecretCueVoice,
       stop,
     });
 
@@ -658,28 +820,87 @@ export function createAudioEngine(): AudioEngine {
     configure(nextSettings) {
       settings = nextSettings;
     },
+    playSecretProgress(word, index) {
+      if (!enabled) {
+        return;
+      }
+
+      const interval =
+        SECRET_PROGRESS_INTERVALS[word][
+          Math.min(index, SECRET_PROGRESS_INTERVALS[word].length - 1)
+        ];
+      void playTransientVoice(
+        createSecretAudioEvent(
+          word,
+          resolvePentatonicByInterval(settings.root, 4, interval),
+          0.16 + index * 0.02,
+          "support",
+          index,
+          SECRET_PROGRESS_INTERVALS[word].length
+        )
+      );
+    },
+    playSecretCue(word) {
+      if (!enabled) {
+        return;
+      }
+
+      clearSecretCueTimers();
+      secretCueActiveUntil = Date.now() + SECRET_CUE_DURATION_MS;
+      resetNetworkMelodyState();
+      stopAmbient(0.14);
+      stopTransientVoices(0.05);
+
+      secretCueReleaseTimeoutId = window.setTimeout(() => {
+        secretCueReleaseTimeoutId = null;
+        secretCueActiveUntil = 0;
+        resumeAmbientIfNeeded();
+      }, SECRET_CUE_DURATION_MS);
+
+      const spec = SECRET_CUE_SPECS[word];
+      spec.steps.forEach((step, index) => {
+        const timeoutId = window.setTimeout(() => {
+          secretCueTimeoutIds.delete(timeoutId);
+          void playTransientVoice(
+            createSecretAudioEvent(
+              word,
+              resolvePentatonicByInterval(settings.root, spec.baseOctave, step.interval),
+              step.intensity,
+              step.batchRole,
+              index,
+              spec.steps.length
+            )
+          );
+        }, step.delayMs);
+
+        secretCueTimeoutIds.add(timeoutId);
+      });
+    },
+    stopSecretCue() {
+      stopActiveSecretCue();
+    },
     enable() {
       enabled = true;
       void ensureAudioContext();
     },
     disable() {
       enabled = false;
+      secretCueActiveUntil = 0;
       stopAmbient(0.5);
       resetNetworkMelodyState();
-      cleanupVoices();
-      if (audioContext) {
-        const now = audioContext.currentTime;
-        activeTransientVoices.forEach((voice) => {
-          voice.gain.gain.cancelScheduledValues(now);
-          voice.gain.gain.setTargetAtTime(0.0001, now, 0.08);
-          voice.stop();
-        });
-      }
-      activeTransientVoices = [];
+      clearSecretCueTimers();
+      stopTransientVoices(0.08);
     },
     syncAmbient(scene: SceneId, nodes: EchoNode[]) {
+      lastAmbientScene = scene;
+      lastAmbientNodes = nodes;
       refreshTopologyBands(nodes);
       if (!enabled) {
+        return;
+      }
+
+      if (isSecretCueActive()) {
+        stopAmbient(0.14);
         return;
       }
 
@@ -692,6 +913,10 @@ export function createAudioEngine(): AudioEngine {
     },
     trigger(event: EchoEvent) {
       if (!enabled) {
+        return;
+      }
+
+      if (isSecretCueActive() && (event.source ?? "network") === "ambient") {
         return;
       }
 
@@ -713,10 +938,11 @@ export function createAudioEngine(): AudioEngine {
     },
     dispose() {
       enabled = false;
+      secretCueActiveUntil = 0;
       stopAmbient(0.1);
       resetNetworkMelodyState();
-      activeTransientVoices.forEach((voice) => voice.stop());
-      activeTransientVoices = [];
+      clearSecretCueTimers();
+      stopTransientVoices(0.05);
 
       if (audioContext) {
         audioContext.close().catch(() => undefined);

@@ -222,9 +222,11 @@ export function App() {
   const audio = useAppStore((state) => state.audio);
   const audioEnabled = useAppStore((state) => state.audioEnabled);
   const audioSettings = useAppStore((state) => state.audioSettings);
+  const secretCue = useAppStore((state) => state.secretCue);
   const networkTransitionVisible = useAppStore((state) => state.networkTransitionVisible);
   const setNetworkState = useAppStore((state) => state.setNetworkState);
   const isSearchFocusPhase = activeScene === "map" && mapSearchTransition !== null;
+  const previousSecretCueRef = useRef(secretCue);
 
   useEffect(() => {
     if (!audioRef.current) {
@@ -350,6 +352,23 @@ export function App() {
       audioRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    const previousSecretCue = previousSecretCueRef.current;
+    previousSecretCueRef.current = secretCue;
+
+    if (previousSecretCue.phase !== "playing" || secretCue.phase === "playing") {
+      return;
+    }
+
+    if (
+      previousSecretCue.expiresAt !== null &&
+      Date.now() < previousSecretCue.expiresAt &&
+      audioEnabled
+    ) {
+      audio?.stopSecretCue();
+    }
+  }, [audio, audioEnabled, secretCue]);
 
   useEffect(() => {
     const previousNetwork = previousNetworkRef.current;

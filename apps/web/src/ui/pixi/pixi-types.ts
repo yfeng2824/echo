@@ -1,4 +1,4 @@
-import type { EchoChannel, EchoEvent, EchoNode, SceneId } from "@echo/contracts";
+import type { EchoChannel, EchoEvent, EchoNode, SceneId, SecretCueState } from "@echo/contracts";
 import type { WorldMapProjection } from "../../lib/map-projection";
 
 export type MapSearchTransition = {
@@ -14,6 +14,7 @@ export type RenderSnapshot = {
   channels: EchoChannel[];
   selectedNodeId: string | null;
   recentEvents: EchoEvent[];
+  secretCue: SecretCueState;
 };
 
 export type HoverState = {
