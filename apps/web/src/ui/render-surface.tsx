@@ -59,6 +59,7 @@ export function RenderSurface() {
   const channels = useAppStore((state) => state.channels);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const recentEvents = useAppStore((state) => state.recentEvents);
+  const secretCue = useAppStore((state) => state.secretCue);
   const selectNode = useAppStore((state) => state.selectNode);
   const appendEvent = useAppStore((state) => state.appendEvent);
   const audio = useAppStore((state) => state.audio);
@@ -104,6 +105,7 @@ export function RenderSurface() {
       channels,
       selectedNodeId,
       recentEvents,
+      secretCue,
     });
   }, [
     activeScene,
@@ -113,6 +115,7 @@ export function RenderSurface() {
     channels,
     selectedNodeId,
     recentEvents,
+    secretCue,
   ]);
 
   return <div ref={mountRef} className="render-surface" aria-hidden="true" />;

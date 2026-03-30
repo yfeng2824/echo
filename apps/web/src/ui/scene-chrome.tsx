@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { AudioDensity } from "@echo/contracts";
+import type { AudioDensity, SecretCueWord } from "@echo/contracts";
 import { useAppStore } from "../state/app-store";
 import { findNodeByQuery } from "../lib/network";
 import { ROOT_OPTIONS } from "../lib/pentatonic";
@@ -15,6 +15,12 @@ type OverlayContent = {
 };
 
 const DENSITY_OPTIONS: AudioDensity[] = ["sparse", "balanced", "rich"];
+const SECRET_WORD_BY_INITIAL: Record<string, SecretCueWord> = {
+  c: "ckb",
+  e: "echo",
+  f: "fiber",
+};
+const SECRET_TYPING_TIMEOUT_MS = 900;
 
 function isTypingTarget(target: EventTarget | null) {
   const element = target as HTMLElement | null;
@@ -47,12 +53,20 @@ export function SceneChrome() {
   const clearMapSearchTransition = useAppStore((state) => state.clearMapSearchTransition);
   const goToMap = useAppStore((state) => state.goToMap);
   const toggleAudio = useAppStore((state) => state.toggleAudio);
+  const audio = useAppStore((state) => state.audio);
+  const secretCue = useAppStore((state) => state.secretCue);
+  const beginSecretWord = useAppStore((state) => state.beginSecretWord);
+  const advanceSecretWord = useAppStore((state) => state.advanceSecretWord);
+  const triggerSecretCue = useAppStore((state) => state.triggerSecretCue);
+  const cancelSecretWord = useAppStore((state) => state.cancelSecretWord);
   const [query, setQuery] = useState("");
   const [searchState, setSearchState] = useState<SearchState>("idle");
   const [emptyOverlayState, setEmptyOverlayState] = useState<EmptyOverlayState>("idle");
   const loadingTimeoutRef = useRef<number | null>(null);
   const dismissTimeoutRef = useRef<number | null>(null);
   const foundTransitionTimeoutRef = useRef<number | null>(null);
+  const secretTypingTimeoutRef = useRef<number | null>(null);
+  const secretCueTimeoutRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const previousSceneRef = useRef(activeScene);
   const previousNetworkRef = useRef(currentNetwork);
@@ -82,6 +96,17 @@ export function SceneChrome() {
   const showCountSkeleton = networkStatus === "loading" || networkTransitionVisible;
   const isSearchLocked = activeScene === "map" && mapSearchTransition !== null;
   const isLiveDataUnavailable = networkStatus === "unavailable";
+  const hasBlockingOverlay =
+    isLiveDataUnavailable || invalidNodeRouteId !== null || searchState === "empty";
+  const isSecretInputBlocked =
+    activeScene !== "map" ||
+    isSearchLocked ||
+    networkTransitionVisible ||
+    hasBlockingOverlay ||
+    networkMenuOpen ||
+    densityMenuOpen ||
+    rootMenuOpen ||
+    mobileControlsMenuOpen;
 
   const cancelSearchTimers = useCallback(() => {
     if (loadingTimeoutRef.current) {
@@ -116,6 +141,12 @@ export function SceneChrome() {
       if (dismissTimeoutRef.current) {
         window.clearTimeout(dismissTimeoutRef.current);
       }
+      if (secretTypingTimeoutRef.current) {
+        window.clearTimeout(secretTypingTimeoutRef.current);
+      }
+      if (secretCueTimeoutRef.current) {
+        window.clearTimeout(secretCueTimeoutRef.current);
+      }
     };
   }, []);
 
@@ -142,12 +173,62 @@ export function SceneChrome() {
   }, [activeScene, cancelSearchTimers, currentNetwork, resetSearchUi]);
 
   useEffect(() => {
+    if (!isSecretInputBlocked || secretCue.phase === "idle") {
+      return;
+    }
+
+    if (secretTypingTimeoutRef.current) {
+      window.clearTimeout(secretTypingTimeoutRef.current);
+      secretTypingTimeoutRef.current = null;
+    }
+    if (secretCueTimeoutRef.current) {
+      window.clearTimeout(secretCueTimeoutRef.current);
+      secretCueTimeoutRef.current = null;
+    }
+    cancelSecretWord();
+  }, [cancelSecretWord, isSecretInputBlocked, secretCue.phase]);
+
+  useEffect(() => {
+    if (secretTypingTimeoutRef.current) {
+      window.clearTimeout(secretTypingTimeoutRef.current);
+      secretTypingTimeoutRef.current = null;
+    }
+    if (secretCueTimeoutRef.current) {
+      window.clearTimeout(secretCueTimeoutRef.current);
+      secretCueTimeoutRef.current = null;
+    }
+
+    if (secretCue.phase === "typing") {
+      secretTypingTimeoutRef.current = window.setTimeout(() => {
+        secretTypingTimeoutRef.current = null;
+        cancelSecretWord();
+      }, SECRET_TYPING_TIMEOUT_MS);
+      return;
+    }
+
+    if (secretCue.phase === "playing" && secretCue.expiresAt) {
+      secretCueTimeoutRef.current = window.setTimeout(
+        () => {
+          secretCueTimeoutRef.current = null;
+          cancelSecretWord();
+        },
+        Math.max(0, secretCue.expiresAt - Date.now())
+      );
+    }
+  }, [cancelSecretWord, secretCue]);
+
+  useEffect(() => {
     const handleSlashShortcut = (event: KeyboardEvent) => {
       if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
         return;
       }
 
-      if (isTypingTarget(event.target) || isSearchLocked || isLiveDataUnavailable) {
+      if (
+        isTypingTarget(event.target) ||
+        isSearchLocked ||
+        isLiveDataUnavailable ||
+        secretCue.phase !== "idle"
+      ) {
         return;
       }
 
@@ -159,7 +240,7 @@ export function SceneChrome() {
     return () => {
       window.removeEventListener("keydown", handleSlashShortcut);
     };
-  }, [isLiveDataUnavailable, isSearchLocked]);
+  }, [isLiveDataUnavailable, isSearchLocked, secretCue.phase]);
 
   useEffect(() => {
     const handleMuteShortcut = (event: KeyboardEvent) => {
@@ -167,7 +248,7 @@ export function SceneChrome() {
         return;
       }
 
-      if (isTypingTarget(event.target)) {
+      if (isTypingTarget(event.target) || secretCue.phase !== "idle") {
         return;
       }
 
@@ -179,7 +260,60 @@ export function SceneChrome() {
     return () => {
       window.removeEventListener("keydown", handleMuteShortcut);
     };
-  }, [toggleAudio]);
+  }, [secretCue.phase, toggleAudio]);
+
+  useEffect(() => {
+    const handleSecretTyping = (event: KeyboardEvent) => {
+      if (event.metaKey || event.ctrlKey || event.altKey || event.key.length !== 1) {
+        return;
+      }
+
+      if (isTypingTarget(event.target) || isSecretInputBlocked || secretCue.phase === "playing") {
+        return;
+      }
+
+      const key = event.key.toLowerCase();
+
+      if (secretCue.phase === "typing" && secretCue.word) {
+        const expectedChar = secretCue.word[secretCue.matchedText.length];
+        if (key !== expectedChar) {
+          cancelSecretWord();
+          return;
+        }
+
+        const nextMatchedText = `${secretCue.matchedText}${key}`;
+        advanceSecretWord(nextMatchedText);
+        audio?.playSecretProgress(secretCue.word, nextMatchedText.length - 1);
+
+        if (nextMatchedText === secretCue.word) {
+          triggerSecretCue();
+          audio?.playSecretCue(secretCue.word);
+        }
+        return;
+      }
+
+      const nextWord = SECRET_WORD_BY_INITIAL[key];
+      if (!nextWord) {
+        return;
+      }
+
+      beginSecretWord(nextWord, key);
+      audio?.playSecretProgress(nextWord, 0);
+    };
+
+    window.addEventListener("keydown", handleSecretTyping);
+    return () => {
+      window.removeEventListener("keydown", handleSecretTyping);
+    };
+  }, [
+    advanceSecretWord,
+    audio,
+    beginSecretWord,
+    cancelSecretWord,
+    isSecretInputBlocked,
+    secretCue,
+    triggerSecretCue,
+  ]);
 
   useEffect(() => {
     if (!showSoundTooltip) {
@@ -407,6 +541,10 @@ export function SceneChrome() {
       buttonAction: handleDismissEmptyState,
     };
   }
+
+  const showSecretPrompt =
+    activeScene === "map" && secretCue.word !== null && secretCue.phase !== "idle";
+  const secretPromptLetters = secretCue.word?.toUpperCase().split("") ?? [];
 
   return (
     <>
@@ -761,6 +899,29 @@ export function SceneChrome() {
           ) : null}
         </div>
       </div>
+
+      {showSecretPrompt ? (
+        <div
+          className={`scene-chrome__secret-overlay ${
+            secretCue.phase === "playing" ? "is-playing" : ""
+          }`}
+          aria-hidden="true"
+        >
+          <div className="scene-chrome__secret-code">
+            {secretPromptLetters.map((letter, index) => {
+              const filled = index < secretCue.matchedText.length;
+              return (
+                <span
+                  key={`${secretCue.word}-${index}`}
+                  className={`scene-chrome__secret-slot ${filled ? "is-filled" : ""}`}
+                >
+                  {filled ? letter : ""}
+                </span>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
 
       {overlayContent ? (
         <div

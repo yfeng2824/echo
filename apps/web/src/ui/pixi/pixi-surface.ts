@@ -33,6 +33,16 @@ export class PixiSurface {
     channels: [],
     selectedNodeId: null,
     recentEvents: [],
+    secretCue: {
+      phase: "idle",
+      word: null,
+      matchedText: "",
+      startedAt: null,
+      expiresAt: null,
+      promptCollapseAt: null,
+      promptReleaseAt: null,
+      promptHideAt: null,
+    },
   };
   private localLayoutSeed = 0;
   private hoveredNodeId: string | null = null;

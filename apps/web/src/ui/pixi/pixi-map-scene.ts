@@ -392,6 +392,46 @@ function getHaloRadius(
   return 6 + breathingHalo + pulse * 16 + hoverHalo + focusHalo;
 }
 
+function getSecretCueWaveEnergy(snapshot: RenderSnapshot, context: RenderContext) {
+  const { secretCue } = snapshot;
+
+  if (
+    secretCue.phase !== "playing" ||
+    !secretCue.word ||
+    secretCue.startedAt === null ||
+    secretCue.expiresAt === null
+  ) {
+    return null;
+  }
+
+  const duration = Math.max(1, secretCue.expiresAt - secretCue.startedAt);
+  const progress = Math.max(0, Math.min(1, (context.now - secretCue.startedAt) / duration));
+  if (progress >= 1) {
+    return null;
+  }
+
+  const attack = Math.min(1, progress / 0.16);
+  const decay = 1 - Math.max(0, (progress - 0.62) / 0.38);
+
+  return {
+    word: secretCue.word,
+    progress,
+    energy: attack * decay,
+  };
+}
+
+function getSecretCuePulse(cue: { progress: number; energy: number } | null) {
+  if (!cue) {
+    return 0;
+  }
+
+  const cycle = (cue.progress * 3) % 1;
+  const pulseShape = Math.sin(cycle * Math.PI);
+  const pulse = Math.max(0, pulseShape) ** 1.35;
+
+  return pulse * cue.energy;
+}
+
 function applyMapFocusTransform(
   layer: MapSceneLayer,
   context: RenderContext,
@@ -451,6 +491,7 @@ export function renderMapScene(
   );
   const transitionPosition = transitionNode ? (mapNodeLayout.get(transitionNode.id) ?? null) : null;
   const hasTransitionNode = transitionNode !== null;
+  const secretCueWave = getSecretCueWaveEnergy(snapshot, context);
 
   applyMapFocusTransform(layer, context, transitionPosition, easedFocus);
 
@@ -499,11 +540,13 @@ export function renderMapScene(
     );
     const visibleRipples = getVisibleRipples(activeRipples, hasTransitionNode, isTransitionNode);
     const pulse = getPulse(visibleRipples, easedFocus, hasTransitionNode, isTransitionNode);
+    const secretCuePulse = getSecretCuePulse(secretCueWave);
+    const totalPulse = pulse + secretCuePulse * 0.95;
     const isHovered = hoverState.hoveredNodeId === node.id;
     const isConnectedToHovered = connectedNodeIds.has(node.id);
     const hasHoverContext = hoveredNode !== null && !hasTransitionNode;
     const halo = getHaloRadius(
-      pulse,
+      totalPulse,
       isHovered,
       isTransitionNode,
       easedFocus,
@@ -553,14 +596,14 @@ export function renderMapScene(
           : 0.02
         : hasHoverContext
           ? isHovered
-            ? 0.12 + pulse * 0.16
+            ? 0.12 + totalPulse * 0.16
             : isConnectedToHovered
-              ? 0.07 + pulse * 0.11
-              : 0.015 + pulse * 0.04
-          : 0.04 + pulse * 0.1 + (isHovered ? 0.06 : 0),
+              ? 0.07 + totalPulse * 0.11
+              : 0.015 + totalPulse * 0.04
+          : 0.04 + totalPulse * 0.12 + (isHovered ? 0.06 : 0),
     });
 
-    layer.cores.circle(x, y, Math.max(2.4, coreRadius));
+    layer.cores.circle(x, y, Math.max(2.4, coreRadius + secretCuePulse * 0.9));
     layer.cores.fill({
       color: 0xffffff,
       alpha: hasTransitionNode
@@ -573,7 +616,7 @@ export function renderMapScene(
             : isConnectedToHovered
               ? 0.76
               : 0.24
-          : 0.85,
+          : Math.min(1, 0.85 + secretCuePulse * 0.08),
     });
 
     if (!hasTransitionNode && isHovered && !isCoarsePointer) {

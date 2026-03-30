@@ -10,7 +10,15 @@ import type {
   HeadlineCounts,
   NetworkSimulation,
   SceneId,
+  SecretCueState,
+  SecretCueWord,
 } from "@echo/contracts";
+import {
+  SECRET_CUE_DURATION_MS,
+  SECRET_PROMPT_COLLAPSE_AT_MS,
+  SECRET_PROMPT_HIDE_AT_MS,
+  SECRET_PROMPT_RELEASE_AT_MS,
+} from "../lib/secret-cue";
 
 type InitializeInput = {
   simulation: NetworkSimulation;
@@ -40,6 +48,7 @@ type AppState = {
   mapSearchTransition: MapSearchTransition | null;
   audioEnabled: boolean;
   audioSettings: AudioSettings;
+  secretCue: SecretCueState;
   nodes: EchoNode[];
   channels: EchoChannel[];
   recentEvents: EchoEvent[];
@@ -60,6 +69,10 @@ type AppState = {
   goToMap: () => void;
   setAudioSettings: (nextSettings: Partial<AudioSettings>) => void;
   toggleAudio: () => void;
+  beginSecretWord: (word: SecretCueWord, initialChar: string) => void;
+  advanceSecretWord: (nextMatchedText: string) => void;
+  triggerSecretCue: () => void;
+  cancelSecretWord: () => void;
 };
 
 const defaultAudioSettings: AudioSettings = {
@@ -71,6 +84,17 @@ const defaultAudioSettings: AudioSettings = {
 const defaultHeadlineCounts: HeadlineCounts = {
   announcedNodeCount: 0,
   channelCount: 0,
+};
+
+const defaultSecretCue: SecretCueState = {
+  phase: "idle",
+  word: null,
+  matchedText: "",
+  startedAt: null,
+  expiresAt: null,
+  promptCollapseAt: null,
+  promptReleaseAt: null,
+  promptHideAt: null,
 };
 
 function derivePeersFromChannels(nodes: EchoNode[], channels: EchoChannel[]) {
@@ -240,6 +264,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   mapSearchTransition: null,
   audioEnabled: true,
   audioSettings: getInitialAudioSettings(),
+  secretCue: defaultSecretCue,
   nodes: [],
   channels: [],
   recentEvents: [],
@@ -257,6 +282,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       headlineCounts,
       selectedNodeId: nextNodes[0]?.id ?? null,
       invalidNodeRouteId: null,
+      secretCue: defaultSecretCue,
     });
   },
   appendEvent: (event) => {
@@ -305,6 +331,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       invalidNodeRouteId: null,
       networkStatus: "loading",
       networkError: null,
+      secretCue: defaultSecretCue,
     });
   },
   setNetworkState: (status, error = null) => {
@@ -320,7 +347,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ invalidNodeRouteId: nodeId });
   },
   setScene: (scene) => {
-    set({ activeScene: scene });
+    set({
+      activeScene: scene,
+      secretCue: scene === "map" ? get().secretCue : defaultSecretCue,
+    });
   },
   selectNode: (nodeId) => {
     set((state) => ({
@@ -329,6 +359,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       nodeSceneEnteredAt: state.activeScene === "node" ? state.nodeSceneEnteredAt : Date.now(),
       mapSearchTransition: null,
       invalidNodeRouteId: null,
+      secretCue: defaultSecretCue,
     }));
   },
   startMapSearchTransition: (nodeId) => {
@@ -338,6 +369,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         nodeId,
         startedAt: Date.now(),
       },
+      secretCue: defaultSecretCue,
     });
   },
   clearMapSearchTransition: () => {
@@ -349,6 +381,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       nodeSceneEnteredAt: null,
       mapSearchTransition: null,
       invalidNodeRouteId: null,
+      secretCue: defaultSecretCue,
     });
   },
   setAudioSettings: (nextSettings) => {
@@ -374,5 +407,55 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({ audioEnabled: nextEnabled });
+  },
+  beginSecretWord: (word, initialChar) => {
+    set({
+      secretCue: {
+        phase: "typing",
+        word,
+        matchedText: initialChar,
+        startedAt: Date.now(),
+        expiresAt: null,
+        promptCollapseAt: null,
+        promptReleaseAt: null,
+        promptHideAt: null,
+      },
+    });
+  },
+  advanceSecretWord: (nextMatchedText) => {
+    set((state) => ({
+      secretCue:
+        state.secretCue.phase === "typing" && state.secretCue.word
+          ? {
+              ...state.secretCue,
+              matchedText: nextMatchedText,
+              startedAt: state.secretCue.startedAt ?? Date.now(),
+            }
+          : state.secretCue,
+    }));
+  },
+  triggerSecretCue: () => {
+    set((state) => {
+      if (!state.secretCue.word) {
+        return { secretCue: defaultSecretCue };
+      }
+
+      const startedAt = Date.now();
+      return {
+        secretCue: {
+          phase: "playing",
+          word: state.secretCue.word,
+          matchedText: state.secretCue.word,
+          startedAt,
+          expiresAt: startedAt + SECRET_CUE_DURATION_MS,
+          promptCollapseAt: startedAt + SECRET_PROMPT_COLLAPSE_AT_MS,
+          promptReleaseAt: startedAt + SECRET_PROMPT_RELEASE_AT_MS,
+          promptHideAt: startedAt + SECRET_PROMPT_HIDE_AT_MS,
+        },
+      };
+    });
+  },
+  cancelSecretWord: () => {
+    set({ secretCue: defaultSecretCue });
   },
 }));

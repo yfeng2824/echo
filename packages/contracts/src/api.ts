@@ -1,4 +1,4 @@
-import type { AudioSettings, EchoChannel, EchoNode, SceneId } from "./models";
+import type { AudioSettings, EchoChannel, EchoNode, SceneId, SecretCueWord } from "./models";
 import type { EchoEvent } from "./events";
 
 export type HeadlineCounts = {
@@ -27,6 +27,9 @@ export type AudioEngine = {
   enable: () => void;
   disable: () => void;
   configure: (settings: AudioSettings) => void;
+  playSecretProgress: (word: SecretCueWord, index: number) => void;
+  playSecretCue: (word: SecretCueWord) => void;
+  stopSecretCue: () => void;
   syncAmbient: (scene: SceneId, nodes: EchoNode[]) => void;
   trigger: (event: EchoEvent) => void;
   dispose: () => void;
