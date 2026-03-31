@@ -1,4 +1,4 @@
-import { CanvasSource, Container, Graphics, Sprite, Text, TextStyle, Texture } from "pixi.js";
+import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { EchoChannel, EchoEvent, EchoNode } from "@echo/contracts";
 import type {
   CollisionBurst,
@@ -10,12 +10,14 @@ import type {
 import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer";
 import { getDisplayNodeId } from "../../lib/node-id";
 import { getNodeViewPeerOrbits } from "../../lib/node-view-layout";
+import {
+  createProjectionTextureLayer,
+  syncProjectionTexture,
+  type ProjectionTextureLayer,
+} from "./pixi-projection-texture";
 
-export type NodeSceneLayer = {
+export type NodeSceneLayer = ProjectionTextureLayer & {
   root: Container;
-  mapSprite: Sprite;
-  mapCanvas: HTMLCanvasElement;
-  mapContext: CanvasRenderingContext2D | null;
   lineGraphics: Graphics;
   rippleGraphics: Graphics;
   nodeGraphics: Graphics;
@@ -42,15 +44,8 @@ type NodeLayoutPoint = {
 
 export function createNodeSceneLayer() {
   const root = new Container();
-  const mapCanvas = document.createElement("canvas");
-  const mapContext = mapCanvas.getContext("2d");
-  const mapSprite = new Sprite(
-    new Texture({
-      source: new CanvasSource({
-        resource: mapCanvas,
-      }),
-    })
-  );
+  const projectionTextureLayer = createProjectionTextureLayer();
+  const { mapSprite } = projectionTextureLayer;
   const lineGraphics = new Graphics();
   const rippleGraphics = new Graphics();
   const nodeGraphics = new Graphics();
@@ -73,10 +68,8 @@ export function createNodeSceneLayer() {
   root.addChild(mapSprite, lineGraphics, rippleGraphics, nodeGraphics, burstGraphics, label);
 
   return {
+    ...projectionTextureLayer,
     root,
-    mapSprite,
-    mapCanvas,
-    mapContext,
     lineGraphics,
     rippleGraphics,
     nodeGraphics,
@@ -86,26 +79,7 @@ export function createNodeSceneLayer() {
 }
 
 function updateMapTexture(layer: NodeSceneLayer, context: RenderContext) {
-  const targetWidth = Math.max(1, Math.floor(context.width * context.dpr));
-  const targetHeight = Math.max(1, Math.floor(context.height * context.dpr));
-
-  if (layer.mapCanvas.width !== targetWidth || layer.mapCanvas.height !== targetHeight) {
-    layer.mapCanvas.width = targetWidth;
-    layer.mapCanvas.height = targetHeight;
-  }
-
-  if (!layer.mapContext) {
-    return;
-  }
-
-  layer.mapContext.setTransform(1, 0, 0, 1, 0, 0);
-  layer.mapContext.clearRect(0, 0, targetWidth, targetHeight);
-  layer.mapContext.setTransform(context.dpr, 0, 0, context.dpr, 0, 0);
-  context.projection.draw(layer.mapContext, 1);
-  layer.mapContext.setTransform(1, 0, 0, 1, 0, 0);
-  layer.mapSprite.texture.source.update();
-  layer.mapSprite.width = context.width;
-  layer.mapSprite.height = context.height;
+  syncProjectionTexture(layer, context);
 }
 
 function getNodeEvents(events: EchoEvent[], nodeId: string) {

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { AudioDensity, SecretCueWord } from "@echo/contracts";
 import { useAppStore } from "../state/app-store";
 import { findNodeByQuery } from "../lib/network";
@@ -7,14 +7,22 @@ import "./scene-chrome.css";
 
 type SearchState = "idle" | "loading" | "empty";
 type EmptyOverlayState = "idle" | "visible" | "closing";
+type CountInfoKey = "announcedNodes" | "activeChannels";
+type TooltipStyle = {
+  left: number;
+  top: number;
+};
 type OverlayContent = {
   title: string;
   description: string;
   buttonLabel: string;
   buttonAction: () => void;
+  secondaryLinkLabel?: string;
+  secondaryLinkHref?: string;
 };
 
 const DENSITY_OPTIONS: AudioDensity[] = ["sparse", "balanced", "rich"];
+const RUN_NODE_GUIDE_URL = "https://www.fiber.world/docs/quick-start/run-a-node";
 const SECRET_WORD_BY_INITIAL: Record<string, SecretCueWord> = {
   c: "ckb",
   e: "echo",
@@ -28,10 +36,40 @@ function isTypingTarget(target: EventTarget | null) {
   return tagName === "INPUT" || tagName === "TEXTAREA" || element?.isContentEditable === true;
 }
 
-function getCountSummary(nodeCount: number, channelCount: number) {
-  return `${nodeCount} Announced ${nodeCount === 1 ? "Node" : "Nodes"} • ${channelCount} Active ${
-    channelCount === 1 ? "Channel" : "Channels"
-  }`;
+function getNetworkLabel(network: "mainnet" | "testnet") {
+  return network === "mainnet" ? "Mainnet" : "Testnet";
+}
+
+function getCountTooltipCopy(infoKey: CountInfoKey) {
+  if (infoKey === "announcedNodes") {
+    return "Nodes currently announced to the network and eligible to appear on the map.";
+  }
+
+  return "All non-closed channels in the current network, including channels that may not be drawable when one endpoint is unannounced.";
+}
+
+function getTooltipStyle(triggerRect: DOMRect, tooltipRect: DOMRect): TooltipStyle {
+  const spacing = 8;
+  const viewportPadding = 8;
+  const centeredLeft = triggerRect.left + triggerRect.width / 2 - tooltipRect.width / 2;
+  const left = Math.min(
+    Math.max(viewportPadding, centeredLeft),
+    window.innerWidth - tooltipRect.width - viewportPadding
+  );
+
+  let top = triggerRect.top - tooltipRect.height - spacing;
+  if (top < viewportPadding) {
+    top = Math.min(
+      triggerRect.bottom + spacing,
+      window.innerHeight - tooltipRect.height - viewportPadding
+    );
+  }
+
+  return { left, top };
+}
+
+function getCountLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 export function SceneChrome() {
@@ -41,6 +79,7 @@ export function SceneChrome() {
   const currentNetwork = useAppStore((state) => state.currentNetwork);
   const invalidNodeRouteId = useAppStore((state) => state.invalidNodeRouteId);
   const networkStatus = useAppStore((state) => state.networkStatus);
+  const networkError = useAppStore((state) => state.networkError);
   const networkTransitionVisible = useAppStore((state) => state.networkTransitionVisible);
   const headlineCounts = useAppStore((state) => state.headlineCounts);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
@@ -84,18 +123,21 @@ export function SceneChrome() {
   const [mobileControlsMenuOpen, setMobileControlsMenuOpen] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showSoundTooltip, setShowSoundTooltip] = useState(false);
-  const [soundTooltipStyle, setSoundTooltipStyle] = useState<{
-    left: number;
-    top: number;
-  } | null>(null);
+  const [soundTooltipStyle, setSoundTooltipStyle] = useState<TooltipStyle | null>(null);
+  const [activeCountTooltip, setActiveCountTooltip] = useState<CountInfoKey | null>(null);
+  const [countTooltipStyle, setCountTooltipStyle] = useState<TooltipStyle | null>(null);
   const [networkMenuVertical, setNetworkMenuVertical] = useState<"down" | "up">("down");
   const [networkMenuHorizontal, setNetworkMenuHorizontal] = useState<"end" | "start">("end");
+  const announcedCountRef = useRef<HTMLButtonElement | null>(null);
+  const activeChannelCountRef = useRef<HTMLButtonElement | null>(null);
+  const countTooltipRef = useRef<HTMLDivElement | null>(null);
 
   const { announcedNodeCount, channelCount } = headlineCounts;
-  const countSummary = getCountSummary(announcedNodeCount, channelCount);
+  const networkLabel = getNetworkLabel(currentNetwork);
   const showCountSkeleton = networkStatus === "loading" || networkTransitionVisible;
   const isSearchLocked = activeScene === "map" && mapSearchTransition !== null;
   const isLiveDataUnavailable = networkStatus === "unavailable";
+  const hasRenderedTopology = nodes.length > 0;
   const hasBlockingOverlay =
     isLiveDataUnavailable || invalidNodeRouteId !== null || searchState === "empty";
   const isSecretInputBlocked =
@@ -107,6 +149,29 @@ export function SceneChrome() {
     densityMenuOpen ||
     rootMenuOpen ||
     mobileControlsMenuOpen;
+  const showSearchHelper =
+    isSearchFocused &&
+    !query.trim() &&
+    searchState !== "loading" &&
+    !hasBlockingOverlay &&
+    !networkTransitionVisible;
+  const countSummaryItems = useMemo(
+    () => [
+      {
+        key: "announcedNodes" as const,
+        ref: announcedCountRef,
+        ariaLabel: "Explain announced nodes",
+        label: getCountLabel(announcedNodeCount, "Announced Node", "Announced Nodes"),
+      },
+      {
+        key: "activeChannels" as const,
+        ref: activeChannelCountRef,
+        ariaLabel: "Explain active channels",
+        label: getCountLabel(channelCount, "Active Channel", "Active Channels"),
+      },
+    ],
+    [announcedNodeCount, channelCount]
+  );
 
   const cancelSearchTimers = useCallback(() => {
     if (loadingTimeoutRef.current) {
@@ -327,23 +392,7 @@ export function SceneChrome() {
         return;
       }
 
-      const spacing = 8;
-      const viewportPadding = 8;
-      const centeredLeft = buttonRect.left + buttonRect.width / 2 - tooltipRect.width / 2;
-      const clampedLeft = Math.min(
-        Math.max(viewportPadding, centeredLeft),
-        window.innerWidth - tooltipRect.width - viewportPadding
-      );
-
-      let top = buttonRect.top - tooltipRect.height - spacing;
-      if (top < viewportPadding) {
-        top = Math.min(
-          buttonRect.bottom + spacing,
-          window.innerHeight - tooltipRect.height - viewportPadding
-        );
-      }
-
-      setSoundTooltipStyle({ left: clampedLeft, top });
+      setSoundTooltipStyle(getTooltipStyle(buttonRect, tooltipRect));
     };
 
     const frame = window.requestAnimationFrame(updateSoundTooltipPosition);
@@ -356,6 +405,56 @@ export function SceneChrome() {
       window.removeEventListener("scroll", updateSoundTooltipPosition, true);
     };
   }, [showSoundTooltip]);
+
+  useEffect(() => {
+    if (!activeCountTooltip) {
+      return;
+    }
+
+    const updateCountTooltipPosition = () => {
+      const trigger = countSummaryItems.find((item) => item.key === activeCountTooltip)?.ref
+        .current;
+      const triggerRect = trigger?.getBoundingClientRect();
+      const tooltipRect = countTooltipRef.current?.getBoundingClientRect();
+      if (!triggerRect || !tooltipRect) {
+        return;
+      }
+
+      setCountTooltipStyle(getTooltipStyle(triggerRect, tooltipRect));
+    };
+
+    const handleWindowPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      const interactingWithTrigger = countSummaryItems.some((item) =>
+        item.ref.current?.contains(target)
+      );
+      if (interactingWithTrigger || countTooltipRef.current?.contains(target)) {
+        return;
+      }
+
+      setActiveCountTooltip(null);
+    };
+
+    const handleWindowKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setActiveCountTooltip(null);
+      }
+    };
+
+    const frame = window.requestAnimationFrame(updateCountTooltipPosition);
+    window.addEventListener("resize", updateCountTooltipPosition);
+    window.addEventListener("scroll", updateCountTooltipPosition, true);
+    window.addEventListener("pointerdown", handleWindowPointerDown);
+    window.addEventListener("keydown", handleWindowKeyDown);
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener("resize", updateCountTooltipPosition);
+      window.removeEventListener("scroll", updateCountTooltipPosition, true);
+      window.removeEventListener("pointerdown", handleWindowPointerDown);
+      window.removeEventListener("keydown", handleWindowKeyDown);
+    };
+  }, [activeCountTooltip, countSummaryItems]);
 
   useEffect(() => {
     if (!networkMenuOpen && !densityMenuOpen && !rootMenuOpen && !mobileControlsMenuOpen) {
@@ -521,24 +620,23 @@ export function SceneChrome() {
 
   if (isLiveDataUnavailable) {
     overlayContent = {
-      title: "No live echo detected",
-      description: "Live network activity is not available right now.",
+      title: hasRenderedTopology ? "Live feed interrupted" : "No live echo detected",
+      description: networkError
+        ? `Live network activity is not available right now. ${networkError}.`
+        : "Live network activity is not available right now.",
       buttonLabel: "Retry",
       buttonAction: () => window.location.reload(),
     };
-  } else if (invalidNodeRouteId) {
-    overlayContent = {
-      title: "Node not found",
-      description: "This node link doesn't exist in the current network.",
-      buttonLabel: "Back",
-      buttonAction: handleInvalidRouteBack,
-    };
-  } else if (searchState === "empty") {
+  } else if (invalidNodeRouteId || searchState === "empty") {
+    const isInvalidRouteOverlay = invalidNodeRouteId !== null;
+
     overlayContent = {
       title: "No echo found",
-      description: "We couldn't find a matching node in the current network.",
-      buttonLabel: "Back",
-      buttonAction: handleDismissEmptyState,
+      description: `We couldn't find a matching announced node in ${networkLabel}. To make your node announced, enable announce_listening_addr and add your public address to announced_addrs.`,
+      buttonLabel: "Return to map",
+      buttonAction: isInvalidRouteOverlay ? handleInvalidRouteBack : handleDismissEmptyState,
+      secondaryLinkLabel: "Want to join the soundscape? ",
+      secondaryLinkHref: RUN_NODE_GUIDE_URL,
     };
   }
 
@@ -562,7 +660,35 @@ export function SceneChrome() {
                 aria-label="Loading node and channel counts"
               />
             ) : (
-              <div className="scene-chrome__meta">{countSummary}</div>
+              <div className="scene-chrome__meta">
+                {countSummaryItems.map((item, index) => (
+                  <Fragment key={item.key}>
+                    {index > 0 ? (
+                      <span className="scene-chrome__meta-divider" aria-hidden="true">
+                        •
+                      </span>
+                    ) : null}
+                    <button
+                      ref={item.ref}
+                      className={`scene-chrome__meta-button ${
+                        activeCountTooltip === item.key ? "is-active" : ""
+                      }`}
+                      type="button"
+                      aria-label={item.ariaLabel}
+                      aria-expanded={activeCountTooltip === item.key}
+                      onMouseEnter={() => setActiveCountTooltip(item.key)}
+                      onMouseLeave={() => setActiveCountTooltip(null)}
+                      onFocus={() => setActiveCountTooltip(item.key)}
+                      onBlur={() => setActiveCountTooltip(null)}
+                      onClick={() =>
+                        setActiveCountTooltip((current) => (current === item.key ? null : item.key))
+                      }
+                    >
+                      {item.label}
+                    </button>
+                  </Fragment>
+                ))}
+              </div>
             )}
           </div>
         </div>
@@ -602,6 +728,11 @@ export function SceneChrome() {
             <span className="scene-chrome__search-shortcut" aria-hidden="true">
               <kbd>/</kbd>
             </span>
+          ) : null}
+          {showSearchHelper ? (
+            <p className="scene-chrome__search-helper" aria-live="polite">
+              Echo finds announced node IDs in the current network.
+            </p>
           ) : null}
         </form>
       </div>
@@ -923,6 +1054,24 @@ export function SceneChrome() {
         </div>
       ) : null}
 
+      {activeCountTooltip ? (
+        <div
+          ref={countTooltipRef}
+          className="scene-chrome__tooltip scene-chrome__tooltip--meta"
+          role="tooltip"
+          style={
+            countTooltipStyle
+              ? {
+                  left: `${countTooltipStyle.left}px`,
+                  top: `${countTooltipStyle.top}px`,
+                }
+              : undefined
+          }
+        >
+          {getCountTooltipCopy(activeCountTooltip)}
+        </div>
+      ) : null}
+
       {overlayContent ? (
         <div
           className={`scene__empty-overlay scene-chrome__empty-overlay ${
@@ -956,6 +1105,19 @@ export function SceneChrome() {
             >
               {overlayContent.buttonLabel}
             </button>
+            {overlayContent.secondaryLinkLabel && overlayContent.secondaryLinkHref ? (
+              <p className="scene-chrome__empty-link">
+                {overlayContent.secondaryLinkLabel}
+                <a
+                  className="scene-chrome__empty-link-anchor"
+                  href={overlayContent.secondaryLinkHref}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  Run a Fiber node.
+                </a>
+              </p>
+            ) : null}
           </div>
         </div>
       ) : null}

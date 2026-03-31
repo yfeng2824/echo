@@ -29,6 +29,12 @@ type InitializeInput = {
   headlineCounts: HeadlineCounts;
 };
 
+type TopologySyncInput = {
+  nodes: EchoNode[];
+  channels: EchoChannel[];
+  headlineCounts: HeadlineCounts;
+};
+
 export type NetworkStatus = "loading" | "ready" | "unavailable";
 
 type MapSearchTransition = {
@@ -56,6 +62,7 @@ type AppState = {
   simulation: NetworkSimulation | null;
   audio: AudioEngine | null;
   initialize: (input: InitializeInput) => void;
+  syncTopology: (input: TopologySyncInput) => void;
   appendEvent: (event: EchoEvent) => void;
   applyEventFeed: (feed: EventFeed) => void;
   setNetwork: (network: EchoNetwork) => void;
@@ -283,6 +290,26 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: nextNodes[0]?.id ?? null,
       invalidNodeRouteId: null,
       secretCue: defaultSecretCue,
+    });
+  },
+  syncTopology: ({ nodes, channels, headlineCounts }) => {
+    set((state) => {
+      const nextNodes = derivePeersFromChannels(nodes, channels);
+      const hasSelectedNode = nextNodes.some((node) => node.id === state.selectedNodeId);
+      const hasMapSearchNode =
+        state.mapSearchTransition !== null &&
+        nextNodes.some((node) => node.id === state.mapSearchTransition?.nodeId);
+
+      return {
+        nodes: nextNodes,
+        channels,
+        headlineCounts,
+        selectedNodeId: hasSelectedNode ? state.selectedNodeId : (nextNodes[0]?.id ?? null),
+        activeScene: hasSelectedNode ? state.activeScene : "map",
+        nodeSceneEnteredAt: hasSelectedNode ? state.nodeSceneEnteredAt : null,
+        mapSearchTransition: hasMapSearchNode ? state.mapSearchTransition : null,
+        invalidNodeRouteId: state.invalidNodeRouteId,
+      };
     });
   },
   appendEvent: (event) => {

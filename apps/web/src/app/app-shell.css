@@ -15,10 +15,18 @@
   --node-sheet-bottom-gap: 72px;
   --map-y-offset: 48px;
   position: relative;
+  height: 100vh;
   min-height: 100vh;
   background: #000;
   color: #fff;
   overflow: hidden;
+}
+
+@supports (height: 100dvh) {
+  .app-shell {
+    height: 100dvh;
+    min-height: 100dvh;
+  }
 }
 
 @media (max-width: 1199px) {

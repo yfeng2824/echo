@@ -2,6 +2,14 @@ import type { EchoNetwork, EventFeed, NetworkSimulation, SceneBootstrap } from "
 
 const DEFAULT_API_BASE_URL = "/api";
 const DEFAULT_POLL_INTERVAL_MS = 8000;
+const DEFAULT_MAX_CONSECUTIVE_FAILURES = 2;
+
+type SimulationLifecycleCallbacks = {
+  pollIntervalMs?: number;
+  maxConsecutiveFailures?: number;
+  onUnavailable?: (error: Error) => void;
+  onRecovered?: () => void;
+};
 
 function getApiBaseUrl() {
   return import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL;
@@ -50,13 +58,18 @@ export function fetchSceneBootstrap(network: EchoNetwork) {
 export function createApiNetworkSimulation(
   network: EchoNetwork,
   initialEvents: SceneBootstrap["recentEvents"] = [],
-  pollIntervalMs = DEFAULT_POLL_INTERVAL_MS
+  callbacks: SimulationLifecycleCallbacks = {}
 ): NetworkSimulation {
+  const pollIntervalMs = callbacks.pollIntervalMs ?? DEFAULT_POLL_INTERVAL_MS;
+  const maxConsecutiveFailures =
+    callbacks.maxConsecutiveFailures ?? DEFAULT_MAX_CONSECUTIVE_FAILURES;
   let timer: number | null = null;
   let stopped = false;
   let activeController: AbortController | null = null;
   let lastSeenAt = getLatestEventTimestamp(initialEvents);
   const seenEventIds = new Set(initialEvents.map((event) => event.id));
+  let consecutiveFailures = 0;
+  let reportedUnavailable = false;
 
   return {
     start(onUpdate) {
@@ -84,6 +97,10 @@ export function createApiNetworkSimulation(
             return;
           }
 
+          const recovered = reportedUnavailable;
+          consecutiveFailures = 0;
+          reportedUnavailable = false;
+
           const nextEvents = [];
           for (const event of payload.events) {
             if (seenEventIds.has(event.id)) {
@@ -99,8 +116,22 @@ export function createApiNetworkSimulation(
             events: nextEvents,
             headlineCounts: payload.headlineCounts,
           });
-        } catch {
-          // Keep the current scene alive if the adapter becomes briefly unavailable.
+
+          if (recovered) {
+            callbacks.onRecovered?.();
+          }
+        } catch (error) {
+          if (stopped || controller.signal.aborted || activeController !== controller) {
+            return;
+          }
+
+          consecutiveFailures += 1;
+          if (!reportedUnavailable && consecutiveFailures >= maxConsecutiveFailures) {
+            reportedUnavailable = true;
+            callbacks.onUnavailable?.(
+              error instanceof Error ? error : new Error("Live event polling failed")
+            );
+          }
         } finally {
           if (activeController === controller) {
             activeController = null;

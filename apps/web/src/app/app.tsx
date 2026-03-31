@@ -30,7 +30,6 @@ type DelayRange = {
 
 type BootstrapLoadResult = {
   bootstrap: SceneBootstrap;
-  simulation: NetworkSimulation;
   status: {
     state: NetworkStatus;
     error?: string | null;
@@ -47,6 +46,7 @@ const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
 const NODE_VIEW_PHRASE_SETTLE_MS = 2400;
 const STARTUP_AUDIO_MUTE_MS = 1000;
+const TOPOLOGY_RESYNC_INTERVAL_MS = 60000;
 
 const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
   sparse: { min: 900, max: 1500 },
@@ -121,18 +121,18 @@ async function loadBootstrap(
 
     return {
       bootstrap,
-      simulation: createApiNetworkSimulation(currentNetwork, bootstrap.recentEvents),
       status: { state: "ready" },
     };
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Network bootstrap failed";
-
     return {
       bootstrap: EMPTY_BOOTSTRAP,
-      simulation: SILENT_SIMULATION,
-      status: { state: "unavailable", error: message },
+      status: { state: "unavailable", error: getErrorMessage(error) },
     };
   }
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : "Network bootstrap failed";
 }
 
 function getSelectedNode(state: Pick<AppStoreState, "nodes" | "selectedNodeId">) {
@@ -212,10 +212,12 @@ export function App() {
   const [startupAudioReady, setStartupAudioReady] = useState(false);
 
   const initialize = useAppStore((state) => state.initialize);
+  const syncTopology = useAppStore((state) => state.syncTopology);
   const appendEvent = useAppStore((state) => state.appendEvent);
   const applyEventFeed = useAppStore((state) => state.applyEventFeed);
   const activeScene = useAppStore((state) => state.activeScene);
   const currentNetwork = useAppStore((state) => state.currentNetwork);
+  const networkStatus = useAppStore((state) => state.networkStatus);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const nodes = useAppStore((state) => state.nodes);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
@@ -236,6 +238,7 @@ export function App() {
     const audioEngine = audioRef.current;
     let cancelled = false;
     let simulation: NetworkSimulation | null = null;
+    let topologyResyncIntervalId: number | null = null;
     const scheduledMelodyVisualTimeouts = new Set<number>();
 
     const clearScheduledMelodyVisualTimeouts = () => {
@@ -284,23 +287,71 @@ export function App() {
       });
     };
 
+    const syncLiveTopology = async (markReadyOnSuccess = false) => {
+      try {
+        const latestBootstrap = await fetchSceneBootstrap(currentNetwork);
+
+        if (cancelled) {
+          return;
+        }
+
+        syncTopology({
+          nodes: latestBootstrap.nodes,
+          channels: latestBootstrap.channels,
+          headlineCounts: latestBootstrap.headlineCounts,
+        });
+
+        if (markReadyOnSuccess) {
+          setNetworkState("ready");
+        }
+      } catch (error) {
+        if (cancelled || !markReadyOnSuccess) {
+          return;
+        }
+
+        setNetworkState("unavailable", getErrorMessage(error));
+      }
+    };
+
     const bootstrap = async () => {
       setNetworkState("loading");
       const result = await loadBootstrap(currentNetwork);
 
       if (cancelled) {
-        result.simulation.stop();
         return;
       }
 
-      simulation = result.simulation;
+      const nextSimulation =
+        result.status.state === "ready"
+          ? createApiNetworkSimulation(currentNetwork, result.bootstrap.recentEvents, {
+              onUnavailable: (error) => {
+                if (!cancelled) {
+                  setNetworkState("unavailable", error.message);
+                }
+              },
+              onRecovered: () => {
+                if (!cancelled) {
+                  void syncLiveTopology(true);
+                }
+              },
+            })
+          : SILENT_SIMULATION;
+
+      simulation = nextSimulation;
       setNetworkState(result.status.state, result.status.error ?? null);
       initialize({
-        simulation: result.simulation,
+        simulation: nextSimulation,
         audio: audioEngine,
         ...result.bootstrap,
       });
-      result.simulation.start(handleFeed);
+
+      if (result.status.state === "ready") {
+        topologyResyncIntervalId = window.setInterval(() => {
+          void syncLiveTopology();
+        }, TOPOLOGY_RESYNC_INTERVAL_MS);
+      }
+
+      nextSimulation.start(handleFeed);
     };
 
     void bootstrap();
@@ -308,9 +359,12 @@ export function App() {
     return () => {
       cancelled = true;
       clearScheduledMelodyVisualTimeouts();
+      if (topologyResyncIntervalId !== null) {
+        window.clearInterval(topologyResyncIntervalId);
+      }
       simulation?.stop();
     };
-  }, [appendEvent, applyEventFeed, currentNetwork, initialize, setNetworkState]);
+  }, [appendEvent, applyEventFeed, currentNetwork, initialize, setNetworkState, syncTopology]);
 
   useEffect(() => {
     const timeoutId = window.setTimeout(() => {
@@ -328,7 +382,12 @@ export function App() {
     }
 
     audio.configure(audioSettings);
-    if (!audioEnabled || networkTransitionVisible || !startupAudioReady) {
+    if (
+      !audioEnabled ||
+      networkTransitionVisible ||
+      !startupAudioReady ||
+      networkStatus !== "ready"
+    ) {
       audio.disable();
       return;
     }
@@ -342,6 +401,7 @@ export function App() {
     audioSettings,
     isSearchFocusPhase,
     networkTransitionVisible,
+    networkStatus,
     nodes,
     startupAudioReady,
   ]);
@@ -421,7 +481,7 @@ export function App() {
   }, [appendEvent, audio, audioEnabled, audioSettings.root, mapSearchTransition, nodes]);
 
   useEffect(() => {
-    if (activeScene !== "map" || isSearchFocusPhase) {
+    if (activeScene !== "map" || isSearchFocusPhase || networkStatus !== "ready") {
       return;
     }
 
@@ -500,11 +560,12 @@ export function App() {
     audioSettings.density,
     audioSettings.root,
     isSearchFocusPhase,
+    networkStatus,
     nodes,
   ]);
 
   useEffect(() => {
-    if (activeScene !== "node" || !selectedNodeId) {
+    if (activeScene !== "node" || !selectedNodeId || networkStatus !== "ready") {
       return;
     }
 
@@ -587,6 +648,7 @@ export function App() {
     audioEnabled,
     audioSettings.density,
     audioSettings.root,
+    networkStatus,
     nodes,
     selectedNodeId,
   ]);

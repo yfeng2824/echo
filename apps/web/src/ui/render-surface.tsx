@@ -118,5 +118,5 @@ export function RenderSurface() {
     secretCue,
   ]);
 
-  return <div ref={mountRef} className="render-surface" aria-hidden="true" />;
+  return <div ref={mountRef} className="render-surface-host" aria-hidden="true" />;
 }
