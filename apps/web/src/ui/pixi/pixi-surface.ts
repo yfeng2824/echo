@@ -52,10 +52,10 @@ export class PixiSurface {
     toNodeId: string;
     startedAt: number;
   } | null = null;
-  private width = window.innerWidth;
-  private height = window.innerHeight;
-  private dpr = Math.min(window.devicePixelRatio || 1, 2);
-  private projection: WorldMapProjection = createWorldMapProjection(this.width, this.height);
+  private width = 0;
+  private height = 0;
+  private dpr = 0;
+  private projection: WorldMapProjection = createWorldMapProjection(1, 1);
   private resizeObserver: ResizeObserver | null = null;
   private destroyed = false;
   private initialized = false;
@@ -70,7 +70,6 @@ export class PixiSurface {
     AccessibilitySystem.defaultOptions.enabledByDefault = false;
 
     await this.app.init({
-      resizeTo: window,
       antialias: true,
       autoDensity: true,
       resolution: this.dpr,
@@ -87,7 +86,7 @@ export class PixiSurface {
     (this.app.renderer as { accessibility?: { destroy?: () => void } }).accessibility?.destroy?.();
 
     this.options.root.appendChild(this.app.canvas);
-    this.app.canvas.className = "render-surface";
+    this.app.canvas.className = "render-surface-canvas";
     this.root.addChild(this.mapLayer.root);
     this.app.stage.addChild(this.root);
     this.syncViewportSize();
@@ -171,9 +170,6 @@ export class PixiSurface {
     }
     this.resizeObserver?.disconnect();
     this.resizeObserver = null;
-    window.removeEventListener("resize", this.resize);
-    window.visualViewport?.removeEventListener("resize", this.resize);
-    window.visualViewport?.removeEventListener("scroll", this.resize);
     this.app.ticker.remove(this.render);
     this.app.destroy(true, { children: true });
   }
@@ -183,8 +179,18 @@ export class PixiSurface {
     const nextWidth = Math.max(1, Math.round(rect.width));
     const nextHeight = Math.max(1, Math.round(rect.height));
     const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
+    const rendererWidth = Math.round(this.app.renderer.screen.width);
+    const rendererHeight = Math.round(this.app.renderer.screen.height);
+    const rendererDpr = this.app.renderer.resolution;
+    const viewportUnchanged =
+      nextWidth === this.width && nextHeight === this.height && nextDpr === this.dpr;
+    const rendererMatchesViewport =
+      !this.initialized ||
+      (rendererWidth === nextWidth &&
+        rendererHeight === nextHeight &&
+        Math.abs(rendererDpr - nextDpr) < 0.001);
 
-    if (nextWidth === this.width && nextHeight === this.height && nextDpr === this.dpr) {
+    if (viewportUnchanged && rendererMatchesViewport) {
       return;
     }
 
@@ -192,14 +198,9 @@ export class PixiSurface {
     this.height = nextHeight;
     this.dpr = nextDpr;
     if (this.initialized) {
-      this.app.renderer.resize(nextWidth, nextHeight);
-      this.app.renderer.resolution = nextDpr;
+      this.app.renderer.resize(nextWidth, nextHeight, nextDpr);
     }
     this.projection = createWorldMapProjection(this.width, this.height);
-  };
-
-  private resize = () => {
-    this.syncViewportSize();
   };
 
   private getRenderContext(now = Date.now(), time = performance.now()) {
@@ -333,9 +334,6 @@ export class PixiSurface {
     this.app.canvas.addEventListener("pointermove", this.handlePointerMove);
     this.app.canvas.addEventListener("click", this.handleClick);
     this.app.canvas.addEventListener("pointerleave", this.handlePointerLeave);
-    window.addEventListener("resize", this.resize);
-    window.visualViewport?.addEventListener("resize", this.resize);
-    window.visualViewport?.addEventListener("scroll", this.resize);
     this.resizeObserver = new ResizeObserver(() => {
       this.syncViewportSize();
     });
