@@ -643,6 +643,7 @@ export function createAudioEngine(): AudioEngine {
     const batchRole = event.batchRole ?? "support";
     const isSecretCueVoice = isSecretCueEvent(event);
     const isCollisionLike = isCollisionLikeResonanceEvent(event);
+    const isRichResonance = source === "resonance" && settings.density === "rich";
     const strength = event.intensity + (batchRole === "lead" ? 0.2 : 0);
 
     if (!isCollisionLike && !allocateTransientSlot(source, batchRole, strength)) {
@@ -670,22 +671,29 @@ export function createAudioEngine(): AudioEngine {
     const attack = 0.008;
     const resonanceBodyDuration = batchRole === "lead" ? 0.42 : batchRole === "tail" ? 0.26 : 0.32;
     const resonanceTailDuration = batchRole === "lead" ? 2.2 : batchRole === "tail" ? 1.45 : 1.7;
+    const richResonanceBodyBoost = isRichResonance ? 0.12 : 0;
+    const richResonanceTailBoost = isRichResonance ? 0.38 : 0;
+    const richResonanceGainBoost = isRichResonance ? 1.14 : 1;
     const bodyDuration = isCollisionLike
       ? 0.12
       : source === "resonance"
-        ? resonanceBodyDuration
+        ? resonanceBodyDuration + richResonanceBodyBoost
         : 0.32;
     const tailDuration = isCollisionLike
       ? 1.45
       : source === "resonance"
-        ? resonanceTailDuration
+        ? resonanceTailDuration + richResonanceTailBoost
         : source === "ambient"
           ? 1.7
           : 2.1;
     const resonanceGainMultiplier = batchRole === "lead" ? 1.12 : batchRole === "tail" ? 0.7 : 0.84;
     const baseGain =
       (source === "resonance" ? 0.06 : 0.045) *
-      (source === "resonance" ? resonanceGainMultiplier : batchRole === "lead" ? 1.15 : 1) *
+      (source === "resonance"
+        ? resonanceGainMultiplier * richResonanceGainBoost
+        : batchRole === "lead"
+          ? 1.15
+          : 1) *
       Math.min(1.1, 0.75 + event.intensity * 0.5);
     const maxGain = baseGain * (isCollisionLike ? 0.6 : 1) * TRANSIENT_GAIN_MULTIPLIER;
 
@@ -711,7 +719,9 @@ export function createAudioEngine(): AudioEngine {
 
     bodyFilter.type = "lowpass";
     bodyFilter.frequency.setValueAtTime(
-      isCollisionLike ? 420 + event.intensity * 160 : 700 + event.intensity * 550,
+      isCollisionLike
+        ? 420 + event.intensity * 160
+        : (isRichResonance ? 820 : 700) + event.intensity * (isRichResonance ? 620 : 550),
       now
     );
     bodyFilter.Q.setValueAtTime(isCollisionLike ? 0.62 : 0.9, now);
@@ -726,13 +736,16 @@ export function createAudioEngine(): AudioEngine {
 
     bodyGain.gain.setValueAtTime(0.0001, now);
     bodyGain.gain.linearRampToValueAtTime(
-      maxGain * (isCollisionLike ? 0.62 : 1),
+      maxGain * (isCollisionLike ? 0.62 : isRichResonance ? 1.08 : 1),
       now + (isCollisionLike ? 0.015 : 0.03)
     );
     bodyGain.gain.exponentialRampToValueAtTime(0.0001, now + bodyDuration + tailDuration);
 
     airGain.gain.setValueAtTime(0.0001, now);
-    airGain.gain.linearRampToValueAtTime(maxGain * (isCollisionLike ? 0.13 : 0.08), now + 0.06);
+    airGain.gain.linearRampToValueAtTime(
+      maxGain * (isCollisionLike ? 0.13 : isRichResonance ? 0.11 : 0.08),
+      now + 0.06
+    );
     airGain.gain.exponentialRampToValueAtTime(
       0.0001,
       now + (isCollisionLike ? tailDuration : tailDuration)

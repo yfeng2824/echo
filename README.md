@@ -1,6 +1,6 @@
 # Echo
 
-Echo is a visual and sonic demo for the Fiber network. It pairs a world-map overview with a focused node view, using live adapter-backed data and a pentatonic audio system to make network activity feel spatial, continuous, and legible.
+Echo is a visual and sonic demo for the Fiber network. It pairs a world-map overview with a focused node view, using live FiberDashboard data and a pentatonic audio system to make network activity feel spatial, continuous, and legible.
 
 ## What It Includes
 
@@ -8,7 +8,7 @@ Echo is a visual and sonic demo for the Fiber network. It pairs a world-map over
 - Zustand
 - Pixi rendering with a `d3-geo` world-map foundation
 - Custom Web Audio engine with pentatonic voicing
-- Fastify adapter service in `apps/api`
+- Direct FiberDashboard fetching from the frontend
 - Shared contracts in `packages/contracts`
 - A two-scene UI: map overview and node resonance view
 - Search-driven node navigation, network switching, and sound controls
@@ -17,7 +17,6 @@ Echo is a visual and sonic demo for the Fiber network. It pairs a world-map over
 
 ```text
 apps/
-  api/        Fastify adapter service for bootstrap, health, event polling, and dashboard normalization
   web/        UI, scenes, state, Pixi renderer, audio engine, and scene overlays
     src/lib/  Shared helpers for node IDs, queries, map projection, API access, and reusable client logic
     src/ui/pixi/  Pixi scene and transition rendering
@@ -30,19 +29,18 @@ packages/
 ```bash
 npm install
 npm run dev
-npm run dev:api
 npm run build
 npm run format
 ```
 
-`npm run dev` starts the web app. Run `npm run dev:api` alongside it so the frontend can talk to the local adapter at `/api`.
+`npm run dev` starts the web app. The frontend fetches FiberDashboard directly, so no local backend is required for development or deployment.
 
 ## Data Flow
 
-- The web app loads its initial scene state from `GET /bootstrap?net=...`.
-- It polls `GET /events?net=...&since=...` for incremental activity updates.
-- The Fastify adapter exposes `GET /health`, `GET /bootstrap`, and `GET /events`.
-- The frontend talks only to the local adapter, not directly to Fiber dashboard upstreams.
+- The web app fetches `nodes_hourly`, `channels_hourly`, `group_channel_by_state`, and `channel_count_by_state` directly from FiberDashboard.
+- It normalizes those upstream payloads in the browser into Echo’s scene bootstrap, topology, and headline counts.
+- It polls FiberDashboard snapshots and derives incremental echo events client-side from topology deltas.
+- No Echo-specific `/bootstrap` or `/events` backend endpoints are required to deploy the frontend.
 
 ## Endpoint Usage
 
@@ -52,15 +50,14 @@ npm run format
 - Topology:
   Rendered nodes and channels come from `nodes_hourly` and `channels_hourly`, with channel state enrichment from `group_channel_by_state`.
 - Node view:
-  The node scene reuses the normalized topology already returned by `/bootstrap`; it does not call a separate per-node upstream endpoint.
+  The node scene reuses the normalized topology already fetched from FiberDashboard; it does not call a separate per-node upstream endpoint.
 - Events:
-  `/events` is produced by the adapter from topology refresh deltas and then polled by the frontend.
+  The frontend derives presentation events from refresh deltas between successive FiberDashboard snapshots.
 
 ## Configuration
 
-- `FIBER_DASHBOARD_MAINNET_API_URL` / `FIBER_DASHBOARD_TESTNET_API_URL` override dashboard API sources
-- `FIBER_REFRESH_INTERVAL_MS` controls adapter refresh cadence
-- `PORT` sets the API server port
+- `VITE_FIBER_DASHBOARD_API_URL` sets a shared dashboard base URL for both networks
+- `VITE_FIBER_DASHBOARD_MAINNET_API_URL` / `VITE_FIBER_DASHBOARD_TESTNET_API_URL` override dashboard API sources per network
 
 ## Interaction Notes
 

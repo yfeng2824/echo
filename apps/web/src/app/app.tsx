@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type {
   AudioDensity,
+  EchoNetwork,
   DegreeHint,
   EchoEvent,
   EventFeed,
@@ -11,7 +12,11 @@ import type {
   SceneBootstrap,
 } from "@echo/contracts";
 import { createAudioEngine } from "../engine/audio/audio-engine";
-import { createApiNetworkSimulation, fetchSceneBootstrap } from "../lib/api-client";
+import {
+  createDashboardNetworkSimulation,
+  fetchDashboardSnapshot,
+  type DashboardSnapshot,
+} from "../lib/fiber-dashboard-client";
 import { getNetworkMelodySpec, isNetworkMelodyEventType } from "../lib/network-event-melody";
 import { buildRegisterBandMap } from "../lib/network";
 import { pickNodeViewPhraseDelay, planNodeViewPhrase } from "../lib/node-view-audio";
@@ -29,6 +34,7 @@ type DelayRange = {
 };
 
 type BootstrapLoadResult = {
+  snapshot: DashboardSnapshot | null;
   bootstrap: SceneBootstrap;
   status: {
     state: NetworkStatus;
@@ -46,7 +52,7 @@ const AMBIENT_DEGREES: Record<number, ScaleDegreeKey[]> = {
 const NETWORK_TRANSIENT_SETTLE_MS = 1800;
 const NODE_VIEW_PHRASE_SETTLE_MS = 2400;
 const STARTUP_AUDIO_MUTE_MS = 1000;
-const TOPOLOGY_RESYNC_INTERVAL_MS = 60000;
+const TOPOLOGY_RESYNC_INTERVAL_MS = 30000;
 
 const AMBIENT_DELAY_BY_DENSITY: Record<AudioDensity, DelayRange> = {
   sparse: { min: 900, max: 1500 },
@@ -117,14 +123,16 @@ async function loadBootstrap(
   currentNetwork: AppStoreState["currentNetwork"]
 ): Promise<BootstrapLoadResult> {
   try {
-    const bootstrap = await fetchSceneBootstrap(currentNetwork);
+    const snapshot = await fetchDashboardSnapshot(currentNetwork);
 
     return {
-      bootstrap,
+      snapshot,
+      bootstrap: snapshot.bootstrap,
       status: { state: "ready" },
     };
   } catch (error) {
     return {
+      snapshot: null,
       bootstrap: EMPTY_BOOTSTRAP,
       status: { state: "unavailable", error: getErrorMessage(error) },
     };
@@ -132,7 +140,7 @@ async function loadBootstrap(
 }
 
 function getErrorMessage(error: unknown) {
-  return error instanceof Error ? error.message : "Network bootstrap failed";
+  return error instanceof Error ? error.message : "Network data load failed";
 }
 
 function getSelectedNode(state: Pick<AppStoreState, "nodes" | "selectedNodeId">) {
@@ -203,6 +211,38 @@ function createAmbientEvent(
   };
 }
 
+async function syncLiveTopologySnapshot(
+  currentNetwork: EchoNetwork,
+  syncTopology: ReturnType<typeof useAppStore.getState>["syncTopology"],
+  setNetworkState: ReturnType<typeof useAppStore.getState>["setNetworkState"],
+  cancelledRef: { current: boolean },
+  markReadyOnSuccess = false
+) {
+  try {
+    const latestSnapshot = await fetchDashboardSnapshot(currentNetwork);
+
+    if (cancelledRef.current) {
+      return;
+    }
+
+    syncTopology({
+      nodes: latestSnapshot.bootstrap.nodes,
+      channels: latestSnapshot.bootstrap.channels,
+      headlineCounts: latestSnapshot.bootstrap.headlineCounts,
+    });
+
+    if (markReadyOnSuccess) {
+      setNetworkState("ready");
+    }
+  } catch (error) {
+    if (cancelledRef.current || !markReadyOnSuccess) {
+      return;
+    }
+
+    setNetworkState("unavailable", getErrorMessage(error));
+  }
+}
+
 export function App() {
   useSceneRouting();
   const audioRef = useRef<ReturnType<typeof createAudioEngine> | null>(null);
@@ -240,6 +280,7 @@ export function App() {
     let simulation: NetworkSimulation | null = null;
     let topologyResyncIntervalId: number | null = null;
     const scheduledMelodyVisualTimeouts = new Set<number>();
+    const cancelledRef = { current: false };
 
     const clearScheduledMelodyVisualTimeouts = () => {
       scheduledMelodyVisualTimeouts.forEach((timeoutId) => {
@@ -287,32 +328,6 @@ export function App() {
       });
     };
 
-    const syncLiveTopology = async (markReadyOnSuccess = false) => {
-      try {
-        const latestBootstrap = await fetchSceneBootstrap(currentNetwork);
-
-        if (cancelled) {
-          return;
-        }
-
-        syncTopology({
-          nodes: latestBootstrap.nodes,
-          channels: latestBootstrap.channels,
-          headlineCounts: latestBootstrap.headlineCounts,
-        });
-
-        if (markReadyOnSuccess) {
-          setNetworkState("ready");
-        }
-      } catch (error) {
-        if (cancelled || !markReadyOnSuccess) {
-          return;
-        }
-
-        setNetworkState("unavailable", getErrorMessage(error));
-      }
-    };
-
     const bootstrap = async () => {
       setNetworkState("loading");
       const result = await loadBootstrap(currentNetwork);
@@ -322,8 +337,8 @@ export function App() {
       }
 
       const nextSimulation =
-        result.status.state === "ready"
-          ? createApiNetworkSimulation(currentNetwork, result.bootstrap.recentEvents, {
+        result.status.state === "ready" && result.snapshot
+          ? createDashboardNetworkSimulation(currentNetwork, result.snapshot, {
               onUnavailable: (error) => {
                 if (!cancelled) {
                   setNetworkState("unavailable", error.message);
@@ -331,7 +346,13 @@ export function App() {
               },
               onRecovered: () => {
                 if (!cancelled) {
-                  void syncLiveTopology(true);
+                  void syncLiveTopologySnapshot(
+                    currentNetwork,
+                    syncTopology,
+                    setNetworkState,
+                    cancelledRef,
+                    true
+                  );
                 }
               },
             })
@@ -347,7 +368,12 @@ export function App() {
 
       if (result.status.state === "ready") {
         topologyResyncIntervalId = window.setInterval(() => {
-          void syncLiveTopology();
+          void syncLiveTopologySnapshot(
+            currentNetwork,
+            syncTopology,
+            setNetworkState,
+            cancelledRef
+          );
         }, TOPOLOGY_RESYNC_INTERVAL_MS);
       }
 
@@ -358,6 +384,7 @@ export function App() {
 
     return () => {
       cancelled = true;
+      cancelledRef.current = true;
       clearScheduledMelodyVisualTimeouts();
       if (topologyResyncIntervalId !== null) {
         window.clearInterval(topologyResyncIntervalId);

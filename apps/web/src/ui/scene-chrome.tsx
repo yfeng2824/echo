@@ -20,9 +20,18 @@ type OverlayContent = {
   secondaryLinkLabel?: string;
   secondaryLinkHref?: string;
 };
+type NetworkOption = {
+  value: "mainnet" | "testnet";
+  label: string;
+};
 
 const DENSITY_OPTIONS: AudioDensity[] = ["sparse", "balanced", "rich"];
+const NETWORK_OPTIONS: NetworkOption[] = [
+  { value: "testnet", label: "Testnet" },
+  { value: "mainnet", label: "Mainnet" },
+];
 const RUN_NODE_GUIDE_URL = "https://www.fiber.world/docs/quick-start/run-a-node";
+const DESKTOP_SHORTCUT_MEDIA_QUERY = "(min-width: 1200px)";
 const SECRET_WORD_BY_INITIAL: Record<string, SecretCueWord> = {
   c: "ckb",
   e: "echo",
@@ -123,6 +132,7 @@ export function SceneChrome() {
   const [mobileControlsMenuOpen, setMobileControlsMenuOpen] = useState(false);
   const [isSearchFocused, setIsSearchFocused] = useState(false);
   const [showSoundTooltip, setShowSoundTooltip] = useState(false);
+  const [showDesktopShortcutHints, setShowDesktopShortcutHints] = useState(false);
   const [soundTooltipStyle, setSoundTooltipStyle] = useState<TooltipStyle | null>(null);
   const [activeCountTooltip, setActiveCountTooltip] = useState<CountInfoKey | null>(null);
   const [countTooltipStyle, setCountTooltipStyle] = useState<TooltipStyle | null>(null);
@@ -195,10 +205,51 @@ export function SceneChrome() {
     [clearMapSearchTransition]
   );
 
+  const closeAllMenus = useCallback(() => {
+    setNetworkMenuOpen(false);
+    setDensityMenuOpen(false);
+    setRootMenuOpen(false);
+    setMobileControlsMenuOpen(false);
+  }, []);
+
   const handleInvalidRouteBack = useCallback(() => {
     setInvalidNodeRouteId(null);
     goToMap();
   }, [goToMap, setInvalidNodeRouteId]);
+
+  const handleNetworkSelection = useCallback(
+    (nextNetwork: NetworkOption["value"], source: "desktop" | "mobile") => {
+      setNetwork(nextNetwork);
+
+      if (source === "desktop") {
+        setNetworkMenuOpen(false);
+        return;
+      }
+
+      setMobileControlsMenuOpen(false);
+    },
+    [setNetwork]
+  );
+
+  const handleRootSelection = useCallback(
+    (root: (typeof ROOT_OPTIONS)[number], closeMenu = false) => {
+      setAudioSettings({ root });
+      if (closeMenu) {
+        setRootMenuOpen(false);
+      }
+    },
+    [setAudioSettings]
+  );
+
+  const handleDensitySelection = useCallback(
+    (density: AudioDensity, closeMenu = false) => {
+      setAudioSettings({ density });
+      if (closeMenu) {
+        setDensityMenuOpen(false);
+      }
+    },
+    [setAudioSettings]
+  );
 
   useEffect(() => {
     return () => {
@@ -213,7 +264,7 @@ export function SceneChrome() {
         window.clearTimeout(secretCueTimeoutRef.current);
       }
     };
-  }, []);
+  }, [cancelSearchTimers]);
 
   useEffect(() => {
     const previousScene = previousSceneRef.current;
@@ -221,6 +272,10 @@ export function SceneChrome() {
 
     if (previousScene === "node" && activeScene === "map") {
       resetSearchUi();
+    }
+
+    if (activeScene !== "map") {
+      setIsSearchFocused(false);
     }
   }, [activeScene, resetSearchUi]);
 
@@ -381,6 +436,32 @@ export function SceneChrome() {
   ]);
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const mediaQuery = window.matchMedia(DESKTOP_SHORTCUT_MEDIA_QUERY);
+    const syncDesktopShortcutHints = (matches: boolean) => {
+      setShowDesktopShortcutHints(matches);
+      if (!matches) {
+        setShowSoundTooltip(false);
+      }
+    };
+
+    syncDesktopShortcutHints(mediaQuery.matches);
+
+    const handleChange = (event: MediaQueryListEvent) => {
+      syncDesktopShortcutHints(event.matches);
+    };
+
+    mediaQuery.addEventListener("change", handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener("change", handleChange);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!showSoundTooltip) {
       return;
     }
@@ -491,27 +572,18 @@ export function SceneChrome() {
       const inRootMenu = rootMenuRef.current?.contains(target);
       const inMobileMenu = mobileControlsMenuRef.current?.contains(target);
       if (!inNetworkMenu && !inDensityMenu && !inRootMenu && !inMobileMenu) {
-        setNetworkMenuOpen(false);
-        setDensityMenuOpen(false);
-        setRootMenuOpen(false);
-        setMobileControlsMenuOpen(false);
+        closeAllMenus();
       }
     };
 
     const handleWindowKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setNetworkMenuOpen(false);
-        setDensityMenuOpen(false);
-        setRootMenuOpen(false);
-        setMobileControlsMenuOpen(false);
+        closeAllMenus();
       }
     };
 
     const handleViewportChange = () => {
-      setNetworkMenuOpen(false);
-      setDensityMenuOpen(false);
-      setRootMenuOpen(false);
-      setMobileControlsMenuOpen(false);
+      closeAllMenus();
     };
 
     window.addEventListener("pointerdown", handleWindowPointerDown);
@@ -526,7 +598,7 @@ export function SceneChrome() {
       window.removeEventListener("resize", handleViewportChange);
       window.removeEventListener("orientationchange", handleViewportChange);
     };
-  }, [densityMenuOpen, mobileControlsMenuOpen, networkMenuOpen, rootMenuOpen]);
+  }, [closeAllMenus, densityMenuOpen, mobileControlsMenuOpen, networkMenuOpen, rootMenuOpen]);
 
   const handleSubmit = (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -646,290 +718,273 @@ export function SceneChrome() {
 
   return (
     <>
-      <header className="scene-chrome scene-chrome--top-left">
-        <div className="scene-chrome__title-group">
-          <button className="scene-chrome__title-button" type="button" onClick={goToMap}>
-            <h1 className="scene-chrome__title">
-              <img className="scene-chrome__logo" src="/echo-icon.svg" alt="Echo" />
-            </h1>
-          </button>
-          <div className="scene-chrome__meta-slot">
-            {showCountSkeleton ? (
-              <div
-                className="scene-chrome__meta-skeleton"
-                aria-label="Loading node and channel counts"
-              />
-            ) : (
-              <div className="scene-chrome__meta">
-                {countSummaryItems.map((item, index) => (
-                  <Fragment key={item.key}>
-                    {index > 0 ? (
-                      <span className="scene-chrome__meta-divider" aria-hidden="true">
-                        •
-                      </span>
-                    ) : null}
-                    <button
-                      ref={item.ref}
-                      className={`scene-chrome__meta-button ${
-                        activeCountTooltip === item.key ? "is-active" : ""
-                      }`}
-                      type="button"
-                      aria-label={item.ariaLabel}
-                      aria-expanded={activeCountTooltip === item.key}
-                      onMouseEnter={() => setActiveCountTooltip(item.key)}
-                      onMouseLeave={() => setActiveCountTooltip(null)}
-                      onFocus={() => setActiveCountTooltip(item.key)}
-                      onBlur={() => setActiveCountTooltip(null)}
-                      onClick={() =>
-                        setActiveCountTooltip((current) => (current === item.key ? null : item.key))
-                      }
-                    >
-                      {item.label}
-                    </button>
-                  </Fragment>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-
-      <div className="scene-chrome scene-chrome--top-center">
-        <form className="scene-chrome__search-box" onSubmit={handleSubmit}>
-          <input
-            ref={searchInputRef}
-            type="text"
-            value={query}
-            placeholder="Search node ID..."
-            aria-label="Search nodes"
-            onChange={handleChange}
-            onFocus={() => setIsSearchFocused(true)}
-            onBlur={() => setIsSearchFocused(false)}
-            autoComplete="off"
-            disabled={isSearchLocked || isLiveDataUnavailable}
-          />
-          {query.trim() ? (
-            <button
-              className="scene-chrome__search-clear"
-              type="button"
-              onClick={handleClearQuery}
-              aria-label="Clear search"
-            >
-              <span aria-hidden="true">×</span>
+      <div className="scene-chrome scene-chrome--top-bar">
+        <header className="scene-chrome__top-region scene-chrome--top-left">
+          <div className="scene-chrome__title-group">
+            <button className="scene-chrome__title-button" type="button" onClick={goToMap}>
+              <h1 className="scene-chrome__title">
+                <img className="scene-chrome__logo" src="/echo-icon.svg" alt="Echo" />
+              </h1>
             </button>
-          ) : null}
-          <span
-            className={`scene-chrome__search-loader ${
-              searchState === "loading" ? "scene-chrome__search-loader--visible" : ""
-            }`}
-            aria-hidden="true"
-          />
-          {!isSearchFocused && !query.trim() && searchState !== "loading" ? (
-            <span className="scene-chrome__search-shortcut" aria-hidden="true">
-              <kbd>/</kbd>
-            </span>
-          ) : null}
-          {showSearchHelper ? (
-            <p className="scene-chrome__search-helper" aria-live="polite">
-              Echo finds announced node IDs in the current network.
-            </p>
-          ) : null}
-        </form>
-      </div>
-
-      <div className={`scene-chrome scene-chrome--top-right ${audioEnabled ? "is-active" : ""}`}>
-        <div className="scene-chrome__sound-control">
-          <button
-            ref={soundButtonRef}
-            className={`chrome-button ${audioEnabled ? "is-active" : ""}`}
-            type="button"
-            onClick={toggleAudio}
-            onMouseEnter={() => setShowSoundTooltip(true)}
-            onMouseLeave={() => setShowSoundTooltip(false)}
-            onFocus={() => setShowSoundTooltip(true)}
-            onBlur={() => setShowSoundTooltip(false)}
-          >
-            Sound: {audioEnabled ? "On" : "Off"}
-          </button>
-          {showSoundTooltip ? (
-            <div
-              ref={soundTooltipRef}
-              className="scene-chrome__tooltip"
-              role="tooltip"
-              style={
-                soundTooltipStyle
-                  ? {
-                      left: `${soundTooltipStyle.left}px`,
-                      top: `${soundTooltipStyle.top}px`,
-                    }
-                  : undefined
-              }
-            >
-              <span className="scene-chrome__tooltip-label">Shortcut: </span>
-              <span className="scene-chrome__tooltip-value">M</span>
-            </div>
-          ) : null}
-        </div>
-        <div className="scene-chrome__network-menu" ref={networkMenuRef}>
-          <button
-            className={`scene-chrome__network-trigger ${networkMenuOpen ? "is-open" : ""}`}
-            type="button"
-            aria-haspopup="listbox"
-            aria-expanded={networkMenuOpen}
-            onClick={() => {
-              setNetworkMenuOpen((open) => !open);
-              setDensityMenuOpen(false);
-              setRootMenuOpen(false);
-            }}
-            ref={networkTriggerRef}
-          >
-            <span>{currentNetwork === "mainnet" ? "Mainnet" : "Testnet"}</span>
-            <span className="scene-chrome__network-caret" aria-hidden="true">
-              ▾
-            </span>
-          </button>
-          {networkMenuOpen ? (
-            <div
-              className={`scene-chrome__network-panel scene-chrome__network-panel--${networkMenuVertical} scene-chrome__network-panel--${networkMenuHorizontal}`}
-              role="listbox"
-              aria-label="Network options"
-              ref={networkPanelRef}
-            >
-              <button
-                className={`scene-chrome__network-option ${currentNetwork === "testnet" ? "is-active" : ""}`}
-                type="button"
-                role="option"
-                aria-selected={currentNetwork === "testnet"}
-                onClick={() => {
-                  setNetwork("testnet");
-                  setNetworkMenuOpen(false);
-                }}
-              >
-                <span className="scene-chrome__network-check" aria-hidden="true">
-                  {currentNetwork === "testnet" ? "✓" : ""}
-                </span>
-                Testnet
-              </button>
-              <button
-                className={`scene-chrome__network-option ${currentNetwork === "mainnet" ? "is-active" : ""}`}
-                type="button"
-                role="option"
-                aria-selected={currentNetwork === "mainnet"}
-                onClick={() => {
-                  setNetwork("mainnet");
-                  setNetworkMenuOpen(false);
-                }}
-              >
-                <span className="scene-chrome__network-check" aria-hidden="true">
-                  {currentNetwork === "mainnet" ? "✓" : ""}
-                </span>
-                Mainnet
-              </button>
-            </div>
-          ) : null}
-        </div>
-        <div className="scene-chrome__mobile-menu" ref={mobileControlsMenuRef}>
-          <button
-            className={`scene-chrome__mobile-menu-trigger ${mobileControlsMenuOpen ? "is-open" : ""}`}
-            type="button"
-            aria-haspopup="dialog"
-            aria-expanded={mobileControlsMenuOpen}
-            aria-label="Open controls menu"
-            onClick={() => setMobileControlsMenuOpen((open) => !open)}
-          >
-            <span className="scene-chrome__mobile-menu-icon" aria-hidden="true">
-              ☰
-            </span>
-          </button>
-          {mobileControlsMenuOpen ? (
-            <div
-              className="scene-chrome__mobile-menu-panel"
-              role="dialog"
-              aria-label="Network and density controls"
-            >
-              <div className="scene-chrome__mobile-section">
-                <div className="audio-controls__label">Root</div>
-                <div className="scene-chrome__mobile-network-row scene-chrome__mobile-network-row--root">
-                  {ROOT_OPTIONS.map((root) => {
-                    const isActive = audioSettings.root === root;
-                    return (
-                      <button
-                        key={`mobile-root-${root}`}
-                        className={`scene-chrome__mobile-network-option ${isActive ? "is-active" : ""}`}
-                        type="button"
-                        onClick={() => {
-                          setAudioSettings({ root });
-                        }}
-                      >
-                        <span className="scene-chrome__mobile-network-check" aria-hidden="true">
-                          {isActive ? "✓" : ""}
+            <div className="scene-chrome__meta-slot">
+              {showCountSkeleton ? (
+                <div
+                  className="scene-chrome__meta-skeleton"
+                  aria-label="Loading node and channel counts"
+                />
+              ) : (
+                <div className="scene-chrome__meta">
+                  {countSummaryItems.map((item, index) => (
+                    <Fragment key={item.key}>
+                      {index > 0 ? (
+                        <span className="scene-chrome__meta-divider" aria-hidden="true">
+                          •
                         </span>
-                        {root}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div className="scene-chrome__mobile-section">
-                <div className="audio-controls__label">Network</div>
-                <div className="scene-chrome__mobile-network-row">
-                  <button
-                    className={`scene-chrome__mobile-network-option ${
-                      currentNetwork === "testnet" ? "is-active" : ""
-                    }`}
-                    type="button"
-                    onClick={() => {
-                      setNetwork("testnet");
-                      setMobileControlsMenuOpen(false);
-                    }}
-                  >
-                    <span className="scene-chrome__mobile-network-check" aria-hidden="true">
-                      {currentNetwork === "testnet" ? "✓" : ""}
-                    </span>
-                    Testnet
-                  </button>
-                  <button
-                    className={`scene-chrome__mobile-network-option ${
-                      currentNetwork === "mainnet" ? "is-active" : ""
-                    }`}
-                    type="button"
-                    onClick={() => {
-                      setNetwork("mainnet");
-                      setMobileControlsMenuOpen(false);
-                    }}
-                  >
-                    <span className="scene-chrome__mobile-network-check" aria-hidden="true">
-                      {currentNetwork === "mainnet" ? "✓" : ""}
-                    </span>
-                    Mainnet
-                  </button>
-                </div>
-              </div>
-
-              <div className="scene-chrome__mobile-section">
-                <div className="audio-controls__label">Density</div>
-                <div className="scene-chrome__mobile-network-row scene-chrome__mobile-network-row--density">
-                  {DENSITY_OPTIONS.map((density) => {
-                    const isSelected = audioSettings.density === density;
-                    return (
+                      ) : null}
                       <button
-                        key={`mobile-density-${density}`}
-                        className={`scene-chrome__mobile-network-option ${isSelected ? "is-active" : ""}`}
+                        ref={item.ref}
+                        className={`scene-chrome__meta-button ${
+                          activeCountTooltip === item.key ? "is-active" : ""
+                        }`}
                         type="button"
-                        onClick={() => setAudioSettings({ density })}
+                        aria-label={item.ariaLabel}
+                        aria-expanded={activeCountTooltip === item.key}
+                        onMouseEnter={() => setActiveCountTooltip(item.key)}
+                        onMouseLeave={() => setActiveCountTooltip(null)}
+                        onFocus={() => setActiveCountTooltip(item.key)}
+                        onBlur={() => setActiveCountTooltip(null)}
+                        onClick={() =>
+                          setActiveCountTooltip((current) =>
+                            current === item.key ? null : item.key
+                          )
+                        }
                       >
-                        <span className="scene-chrome__mobile-network-check" aria-hidden="true">
-                          {isSelected ? "✓" : ""}
-                        </span>
-                        {density}
+                        {item.label}
                       </button>
-                    );
-                  })}
+                    </Fragment>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </header>
+
+        <div className="scene-chrome__top-region scene-chrome--top-center">
+          <form className="scene-chrome__search-box" onSubmit={handleSubmit}>
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={query}
+              placeholder="Search node ID..."
+              aria-label="Search nodes"
+              onChange={handleChange}
+              onFocus={() => setIsSearchFocused(true)}
+              onBlur={() => setIsSearchFocused(false)}
+              autoComplete="off"
+              disabled={isSearchLocked || networkTransitionVisible || isLiveDataUnavailable}
+            />
+            {query.trim() ? (
+              <button
+                className="scene-chrome__search-clear"
+                type="button"
+                onClick={handleClearQuery}
+                aria-label="Clear search"
+              >
+                <span aria-hidden="true">×</span>
+              </button>
+            ) : null}
+            <span
+              className={`scene-chrome__search-loader ${
+                searchState === "loading" ? "scene-chrome__search-loader--visible" : ""
+              }`}
+              aria-hidden="true"
+            />
+            {!isSearchFocused && !query.trim() && searchState !== "loading" ? (
+              <span className="scene-chrome__search-shortcut" aria-hidden="true">
+                <kbd>/</kbd>
+              </span>
+            ) : null}
+            {showSearchHelper ? (
+              <p className="scene-chrome__search-helper" aria-live="polite">
+                Echo finds announced node IDs in the current network.
+              </p>
+            ) : null}
+          </form>
+        </div>
+
+        <div
+          className={`scene-chrome__top-region scene-chrome--top-right ${audioEnabled ? "is-active" : ""}`}
+        >
+          <div className="scene-chrome__sound-control">
+            <button
+              ref={soundButtonRef}
+              className={`chrome-button ${audioEnabled ? "is-active" : ""}`}
+              type="button"
+              onClick={toggleAudio}
+              onMouseEnter={() => showDesktopShortcutHints && setShowSoundTooltip(true)}
+              onMouseLeave={() => setShowSoundTooltip(false)}
+              onFocus={() => showDesktopShortcutHints && setShowSoundTooltip(true)}
+              onBlur={() => setShowSoundTooltip(false)}
+            >
+              Sound: {audioEnabled ? "On" : "Off"}
+            </button>
+            {showDesktopShortcutHints && showSoundTooltip ? (
+              <div
+                ref={soundTooltipRef}
+                className="scene-chrome__tooltip"
+                role="tooltip"
+                style={
+                  soundTooltipStyle
+                    ? {
+                        left: `${soundTooltipStyle.left}px`,
+                        top: `${soundTooltipStyle.top}px`,
+                      }
+                    : undefined
+                }
+              >
+                <span className="scene-chrome__tooltip-label">Shortcut: </span>
+                <span className="scene-chrome__tooltip-value">M</span>
+              </div>
+            ) : null}
+          </div>
+          <div className="scene-chrome__network-menu" ref={networkMenuRef}>
+            <button
+              className={`scene-chrome__network-trigger ${networkMenuOpen ? "is-open" : ""}`}
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={networkMenuOpen}
+              onClick={() => {
+                setNetworkMenuOpen((open) => !open);
+                setDensityMenuOpen(false);
+                setRootMenuOpen(false);
+                setMobileControlsMenuOpen(false);
+              }}
+              ref={networkTriggerRef}
+            >
+              <span>{currentNetwork === "mainnet" ? "Mainnet" : "Testnet"}</span>
+              <span className="scene-chrome__network-caret" aria-hidden="true">
+                ▾
+              </span>
+            </button>
+            {networkMenuOpen ? (
+              <div
+                className={`scene-chrome__network-panel scene-chrome__network-panel--${networkMenuVertical} scene-chrome__network-panel--${networkMenuHorizontal}`}
+                role="listbox"
+                aria-label="Network options"
+                ref={networkPanelRef}
+              >
+                {NETWORK_OPTIONS.map((option) => {
+                  const isActive = currentNetwork === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      className={`scene-chrome__network-option ${isActive ? "is-active" : ""}`}
+                      type="button"
+                      role="option"
+                      aria-selected={isActive}
+                      onClick={() => handleNetworkSelection(option.value, "desktop")}
+                    >
+                      <span className="scene-chrome__network-check" aria-hidden="true">
+                        {isActive ? "✓" : ""}
+                      </span>
+                      {option.label}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <div className="scene-chrome__mobile-menu" ref={mobileControlsMenuRef}>
+            <button
+              className={`scene-chrome__mobile-menu-trigger ${mobileControlsMenuOpen ? "is-open" : ""}`}
+              type="button"
+              aria-haspopup="dialog"
+              aria-expanded={mobileControlsMenuOpen}
+              aria-label="Open controls menu"
+              onClick={() => setMobileControlsMenuOpen((open) => !open)}
+            >
+              <span className="scene-chrome__mobile-menu-icon" aria-hidden="true">
+                ☰
+              </span>
+            </button>
+            {mobileControlsMenuOpen ? (
+              <div
+                className="scene-chrome__mobile-menu-panel"
+                role="dialog"
+                aria-label="Network and density controls"
+              >
+                <div className="scene-chrome__mobile-section">
+                  <div className="audio-controls__label">Root</div>
+                  <div className="scene-chrome__mobile-network-row scene-chrome__mobile-network-row--root">
+                    {ROOT_OPTIONS.map((root) => {
+                      const isActive = audioSettings.root === root;
+                      return (
+                        <button
+                          key={`mobile-root-${root}`}
+                          className={`scene-chrome__mobile-network-option ${isActive ? "is-active" : ""}`}
+                          type="button"
+                          onClick={() => handleRootSelection(root)}
+                        >
+                          <span className="scene-chrome__mobile-network-check" aria-hidden="true">
+                            {isActive ? "✓" : ""}
+                          </span>
+                          {root}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="scene-chrome__mobile-section">
+                  <div className="audio-controls__label">Network</div>
+                  <div className="scene-chrome__mobile-network-row">
+                    {NETWORK_OPTIONS.map((option) => {
+                      const isActive = currentNetwork === option.value;
+                      return (
+                        <button
+                          key={`mobile-network-${option.value}`}
+                          className={`scene-chrome__mobile-network-option ${
+                            isActive ? "is-active" : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleNetworkSelection(option.value, "mobile")}
+                        >
+                          <span className="scene-chrome__mobile-network-check" aria-hidden="true">
+                            {isActive ? "✓" : ""}
+                          </span>
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="scene-chrome__mobile-section">
+                  <div className="audio-controls__label">Density</div>
+                  <div className="scene-chrome__mobile-network-row scene-chrome__mobile-network-row--density">
+                    {DENSITY_OPTIONS.map((density) => {
+                      const isSelected = audioSettings.density === density;
+                      return (
+                        <button
+                          key={`mobile-density-${density}`}
+                          className={`scene-chrome__mobile-network-option ${
+                            isSelected ? "is-active" : ""
+                          }`}
+                          type="button"
+                          onClick={() => handleDensitySelection(density)}
+                        >
+                          <span className="scene-chrome__mobile-network-check" aria-hidden="true">
+                            {isSelected ? "✓" : ""}
+                          </span>
+                          {density}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
               </div>
-            </div>
-          ) : null}
+            ) : null}
+          </div>
         </div>
       </div>
 
@@ -944,6 +999,7 @@ export function SceneChrome() {
               setRootMenuOpen((open) => !open);
               setDensityMenuOpen(false);
               setNetworkMenuOpen(false);
+              setMobileControlsMenuOpen(false);
             }}
           >
             <span>Root: {audioSettings.root}</span>
@@ -966,10 +1022,7 @@ export function SceneChrome() {
                     type="button"
                     role="option"
                     aria-selected={isActive}
-                    onClick={() => {
-                      setAudioSettings({ root });
-                      setRootMenuOpen(false);
-                    }}
+                    onClick={() => handleRootSelection(root, true)}
                   >
                     <span className="scene-chrome__network-check" aria-hidden="true">
                       {isActive ? "✓" : ""}
@@ -992,6 +1045,7 @@ export function SceneChrome() {
               setDensityMenuOpen((open) => !open);
               setRootMenuOpen(false);
               setNetworkMenuOpen(false);
+              setMobileControlsMenuOpen(false);
             }}
           >
             <span>Density: {audioSettings.density}</span>
@@ -1014,10 +1068,7 @@ export function SceneChrome() {
                     type="button"
                     role="option"
                     aria-selected={isSelected}
-                    onClick={() => {
-                      setAudioSettings({ density });
-                      setDensityMenuOpen(false);
-                    }}
+                    onClick={() => handleDensitySelection(density, true)}
                   >
                     <span className="scene-chrome__network-check" aria-hidden="true">
                       {isSelected ? "✓" : ""}
