@@ -95,6 +95,7 @@ const ROOT_SEMITONE: Record<AudioRoot, number> = {
   B: 11,
 };
 
+const MAX_ACTIVE_TRANSIENT_VOICES = 32;
 const COLLISION_INTENSITY_THRESHOLD = 0.2;
 const COLLISION_VOICING_INTERVALS = [12, 19, 24, 19] as const;
 const NETWORK_MELODY_PRIORITY_CAP_MS = 1300;
@@ -220,7 +221,12 @@ export function createAudioEngine(): AudioEngine {
 
   const ensureAudioContext = async () => {
     if (!audioContext) {
-      audioContext = new window.AudioContext();
+      try {
+        audioContext = new window.AudioContext();
+      } catch {
+        // Browser does not support Web Audio API or context creation was blocked.
+        return null;
+      }
     }
 
     if (audioContext.state === "suspended") {
@@ -539,6 +545,33 @@ export function createAudioEngine(): AudioEngine {
     strength: number
   ) => {
     cleanupVoices();
+
+    if (activeTransientVoices.length >= MAX_ACTIVE_TRANSIENT_VOICES) {
+      // Evict the weakest non-secret-cue voice to make room.
+      let weakestIndex = -1;
+      let weakestStrength = Infinity;
+
+      for (let i = 0; i < activeTransientVoices.length; i += 1) {
+        const voice = activeTransientVoices[i];
+        if (!voice.isSecretCue && voice.strength < weakestStrength) {
+          weakestStrength = voice.strength;
+          weakestIndex = i;
+        }
+      }
+
+      if (weakestIndex === -1 || strength < weakestStrength) {
+        return false;
+      }
+
+      const evicted = activeTransientVoices.splice(weakestIndex, 1)[0];
+      if (audioContext) {
+        const now = audioContext.currentTime;
+        evicted.gain.gain.cancelScheduledValues(now);
+        evicted.gain.gain.setTargetAtTime(0.0001, now, 0.03);
+        evicted.stop();
+      }
+    }
+
     return true;
   };
 
@@ -574,6 +607,9 @@ export function createAudioEngine(): AudioEngine {
   const startAmbient = async (nodes: EchoNode[]) => {
     const liveNodes = nodes;
     const context = await ensureAudioContext();
+    if (!context) {
+      return;
+    }
 
     refreshTopologyBands(nodes);
     stopAmbient(0.25);
@@ -637,6 +673,9 @@ export function createAudioEngine(): AudioEngine {
     }
 
     const context = await ensureAudioContext();
+    if (!context) {
+      return;
+    }
     const frequency = getFrequency(event);
     const now = context.currentTime;
     const source = event.source ?? "network";
@@ -665,7 +704,10 @@ export function createAudioEngine(): AudioEngine {
     const pluckGain = context.createGain();
     const bodyGain = context.createGain();
     const airGain = context.createGain();
-    const spatialPanner = isCollisionLike ? context.createStereoPanner() : null;
+    const spatialPanner =
+      isCollisionLike && typeof context.createStereoPanner === "function"
+        ? context.createStereoPanner()
+        : null;
     const panLfo = isCollisionLike ? context.createOscillator() : null;
     const panDepth = isCollisionLike ? context.createGain() : null;
     const attack = 0.008;
@@ -811,7 +853,12 @@ export function createAudioEngine(): AudioEngine {
       stop,
     });
 
-    bodyOscillator.onended = () => {
+    let voiceCleaned = false;
+    const cleanupVoiceNodes = () => {
+      if (voiceCleaned) {
+        return;
+      }
+      voiceCleaned = true;
       masterGain.disconnect();
       pluckOscillator.disconnect();
       bodyOscillator.disconnect();
@@ -827,6 +874,12 @@ export function createAudioEngine(): AudioEngine {
       airGain.disconnect();
       activeTransientVoices = activeTransientVoices.filter((voice) => voice.gain !== masterGain);
     };
+
+    bodyOscillator.onended = cleanupVoiceNodes;
+
+    // Fallback cleanup in case onended never fires (e.g. tab backgrounding, browser bugs).
+    const fallbackDelayMs = (bodyDuration + tailDuration + 0.5) * 1000;
+    window.setTimeout(cleanupVoiceNodes, fallbackDelayMs);
   };
 
   return {
