@@ -1,27 +1,48 @@
 # Echo
 
-Echo is a visual and sonic demo for the Fiber network. It pairs a world-map overview with a focused node view, using live FiberDashboard data and a pentatonic audio system to make network activity feel spatial, continuous, and legible.
+## What Echo Is
 
-## What It Includes
+Echo is an audiovisual demo that makes the Fiber network more perceptible through motion and sound. Rather than functioning as a traditional dashboard, it presents network presence and activity as something you can both see and hear.
 
-- React + TypeScript + Vite
-- Zustand
-- Pixi rendering with a `d3-geo` world-map foundation
-- Custom Web Audio engine with pentatonic voicing
-- Direct FiberDashboard fetching from the frontend
-- Shared contracts in `packages/contracts`
-- A two-scene UI: map overview and node resonance view
-- Search-driven node navigation, network switching, and sound controls
+## How It Works
+
+Echo uses live data from the Fiber Dashboard API (`https://api-dashboard.fiber.channel`) to visualize Fiber nodes and channels and to drive event-based audio.
+
+The app polls data every 30 seconds and compares snapshots between refreshes to detect network changes. From those deltas, Echo derives channel-related events such as `channel_opened`, `channel_updated`, and `channel_closed`. These events shape both the visual system and the sound system.
+
+### Visual + Audio Behavior
+
+- Announced nodes are rendered on a world map, with small geo-location adjustments to reduce overlap
+- Network changes are expressed through motion, transitions, and event-driven sound cues
+- Even when no major event is detected, ambient motion and sound remain present to suggest ongoing network life
+- Distinct musical motifs are used for channel opening, closing, and updating
+- Layered transient voices respond to event intensity and node connectivity
+- When focusing on a single node, Echo can generate node-specific phrases tied to its local network relationships
+- Hidden easter egg sequences can be triggered by certain typed words
+
+Echo’s sound system is built with the Web Audio API and combines an ambient bed with event-driven melodic responses. The result is not just a display of network activity, but a continuous audiovisual interpretation of network presence.
+
+## Current Limitations
+
+Echo is only as live as its data source. The demo currently listens to the Fiber Dashboard API, which refreshes every 30 seconds. Because of that, Echo reflects network activity through the same refresh cycle rather than through a fully real-time event stream.
+
+This means Echo should be understood as an expressive interpretation of network liveness, not a literal second-by-second view of everything happening on Fiber.
 
 ## Project Structure
 
 ```text
 apps/
-  web/        UI, scenes, state, Pixi renderer, audio engine, and scene overlays
-    src/lib/  Shared helpers for node IDs, queries, map projection, API access, and reusable client logic
-    src/ui/pixi/  Pixi scene and transition rendering
+  web/                Vite app for the Echo experience
+    src/app/          App shell and top-level React wiring
+    src/engine/       Audio engine and simulation-facing runtime logic
+    src/lib/          API client, Fiber data shaping, map helpers, and shared utilities
+    src/scenes/       Scene-specific behavior for the world map and node resonance views
+    src/state/        Zustand store and app state transitions
+    src/styles/       Global styles for the experience
+    src/ui/           React UI and Pixi rendering surface
+      pixi/           Map and node scene rendering, transitions, and interaction layers
 packages/
-  contracts/  Shared types for nodes, channels, events, and audio metadata
+  contracts/          Shared API, model, and event types used across the app
 ```
 
 ## Local Development
@@ -30,45 +51,25 @@ packages/
 npm install
 npm run dev
 npm run build
+npm run preview
 npm run format
 ```
+`npm run dev` starts the web app at `http://localhost:5173`.
 
-`npm run dev` starts the web app. The frontend fetches FiberDashboard directly, so no local backend is required for development or deployment.
+## FAQ
 
-## Data Flow
+### How often does Echo fetch live data?
 
-- The web app fetches `nodes_hourly`, `channels_hourly`, `group_channel_by_state`, and `channel_count_by_state` directly from FiberDashboard.
-- It normalizes those upstream payloads in the browser into Echo’s scene bootstrap, topology, and headline counts.
-- It polls FiberDashboard snapshots and derives incremental echo events client-side from topology deltas.
-- No Echo-specific `/bootstrap` or `/events` backend endpoints are required to deploy the frontend.
+Echo fetches data every 30 seconds, matching the same refresh frequency used by the Fiber Dashboard for its key metrics.
 
-## Endpoint Usage
+### Why is there a mismatch between the node and channel counts in Echo and the Fiber Dashboard?
 
-- Header counts:
-  `Announced Nodes` comes from `nodes_hourly.total_count`.
-  `Active Channels` comes from `channel_count_by_state`, aggregated as `open + closed_waiting_onchain_settlement` across all assets.
-- Topology:
-  Rendered nodes and channels come from `nodes_hourly` and `channels_hourly`, with channel state enrichment from `group_channel_by_state`.
-- Node view:
-  The node scene reuses the normalized topology already fetched from FiberDashboard; it does not call a separate per-node upstream endpoint.
-- Events:
-  The frontend derives presentation events from refresh deltas between successive FiberDashboard snapshots.
+The announced node count in Echo should match the Fiber Dashboard. The channel count can differ because Echo focuses on representing network liveness. Its active channel count excludes closed channels, while the Fiber Dashboard may include them in other views or aggregates.
 
-## Configuration
+You may also notice a difference between Echo’s active channel count and the channels shown on the map. This happens because the map drops a channel if either endpoint is not announced.
 
-- `VITE_FIBER_DASHBOARD_API_URL` sets a shared dashboard base URL for both networks
-- `VITE_FIBER_DASHBOARD_MAINNET_API_URL` / `VITE_FIBER_DASHBOARD_TESTNET_API_URL` override dashboard API sources per network
+### Why make something like this?
 
-## Interaction Notes
+Echo was not made to solve a direct utility problem.
 
-- Rendering uses Pixi, with `d3-geo` providing the projection-based world map
-- The sonic system uses a pentatonic design with selectable root
-- Sound defaults on with a short startup mute gate; muting disables audio while keeping visual motion active
-- Keyboard shortcuts are available for search focus and sound toggle
-- Invalid direct node routes show explicit not-found UX instead of silently falling back
-- The node scene reseeds peer layout on entry so repeated visits feel different
-- Collision-generated echo rings are capped to prevent noisy feedback loops
-
-## Next Steps
-
-- Continue polishing the Pixi renderer and scene feel
+It is an experiment in perceiving the Fiber network differently — not just through metrics and status, but through motion, sound, and presence. The goal is to explore a more emotional and expressive way of relating to the network, and to suggest that community tools can also be cultural, atmospheric, and art-driven.

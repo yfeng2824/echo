@@ -9,7 +9,8 @@
 ## Data
 
 - Keep one consistent data access strategy per data type.
-- Prefer the app API layer for consistency.
+- Prefer `apps/web/src/lib/fiber-dashboard-client.ts` for dashboard fetch, snapshot shaping, caching, and polling.
+- Keep derived events and simulation state faithful to the live Fiber Dashboard data model.
 - Use motion and sound to express liveness without changing underlying data.
 - Expose invalid states clearly.
 - Do not invent fallback behavior for ambiguous cases; discuss first.
@@ -33,6 +34,14 @@
 
 - Keep simulation, rendering, interaction, and audio separate.
 - Keep behavior consistent across the product.
+
+## Development
+
+- Prefer the root workspace scripts for local work:
+- `npm run dev` for the local app
+- `npm run build` for production builds
+- `npm run preview` to serve the production build locally
+- `npm run format` before landing broad formatting changes
 
 ## Commits
 
