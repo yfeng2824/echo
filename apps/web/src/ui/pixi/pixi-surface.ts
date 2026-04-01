@@ -6,6 +6,9 @@ import { createMapSceneLayer, findMapNodeAtPoint, renderMapScene } from "./pixi-
 import type { NodeSceneLayer } from "./pixi-node-scene";
 import type { CollisionBurst, RenderSnapshot, VisualProfile } from "./pixi-types";
 
+const MAX_COLLISION_HISTORY_SIZE = 2000;
+const MAX_COLLISION_BURSTS = 200;
+
 type PixiSurfaceOptions = {
   root: HTMLElement;
   selectNode: (nodeId: string) => void;
@@ -409,5 +412,19 @@ export class PixiSurface {
       this.options.getVisualProfile,
       2
     );
+
+    // Evict oldest collision history entries to prevent unbounded memory growth.
+    if (this.collisionHistory.size > MAX_COLLISION_HISTORY_SIZE) {
+      const entries = [...this.collisionHistory.entries()]
+        .sort((a, b) => a[1] - b[1])
+        .slice(0, this.collisionHistory.size - MAX_COLLISION_HISTORY_SIZE);
+      for (const [key] of entries) {
+        this.collisionHistory.delete(key);
+      }
+    }
+
+    if (this.collisionBursts.length > MAX_COLLISION_BURSTS) {
+      this.collisionBursts = this.collisionBursts.slice(-MAX_COLLISION_BURSTS);
+    }
   };
 }
