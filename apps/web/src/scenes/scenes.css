@@ -27,6 +27,16 @@
   z-index: var(--scene-panel-z, 11);
 }
 
+.scene__mobile-node-panel-toggle {
+  display: none;
+}
+
+.scene__mobile-node-panel-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
 .scene__empty-state {
   position: absolute;
   left: 50%;
@@ -511,6 +521,81 @@
     overflow: auto;
   }
 
+  .scene__overlay--node-card-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    overflow: hidden;
+  }
+
+  .scene__overlay--node-card-mobile.is-collapsed {
+    max-height: none;
+    padding: 10px 12px;
+  }
+
+  .scene__mobile-node-panel-toggle {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    width: 100%;
+    min-height: 44px;
+    min-width: 0;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #fff;
+    font: inherit;
+    text-align: left;
+  }
+
+  .scene__mobile-node-panel-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    gap: 4px;
+  }
+
+  .scene__mobile-node-panel-label {
+    font-size: 10px;
+    letter-spacing: 0.18em;
+    text-transform: uppercase;
+    opacity: 0.54;
+  }
+
+  .scene__mobile-node-panel-value {
+    min-width: 0;
+    font-size: 12px;
+    letter-spacing: 0.08em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .scene__mobile-node-panel-caret {
+    flex: 0 0 auto;
+    font-size: 13px;
+    opacity: 0.72;
+    transition:
+      transform 0.24s ease,
+      opacity 0.24s ease;
+  }
+
+  .scene__mobile-node-panel-toggle.is-open .scene__mobile-node-panel-caret {
+    transform: rotate(180deg);
+    opacity: 1;
+  }
+
+  .scene__mobile-node-panel-content {
+    min-width: 0;
+  }
+
+  .scene__action-controls--mobile-node {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 2px;
+  }
+
   .scene__card,
   .scene__list-button {
     width: 100%;
@@ -537,6 +622,24 @@
 }
 
 @media (max-width: 1199px) {
+  .scene__copy-control {
+    min-height: 44px;
+  }
+
+  .scene__copy-button {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .scene__list-button {
+    min-height: 44px;
+    padding: 0;
+    align-items: center;
+  }
+
   .scene__card-row {
     flex-direction: column;
     align-items: flex-start;

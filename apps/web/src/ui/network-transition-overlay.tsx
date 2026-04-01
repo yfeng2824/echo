@@ -21,11 +21,13 @@ function createOverlayState(network: string, phase: OverlayState["phase"]): Over
 export function NetworkTransitionOverlay() {
   const currentNetwork = useAppStore((state) => state.currentNetwork);
   const networkStatus = useAppStore((state) => state.networkStatus);
+  const nodes = useAppStore((state) => state.nodes);
   const setNetworkTransitionVisible = useAppStore((state) => state.setNetworkTransitionVisible);
 
   const previousNetworkRef = useRef(currentNetwork);
   const clearTimerRef = useRef<number | null>(null);
   const [overlayState, setOverlayState] = useState<OverlayState | null>(null);
+  const isInitialLoadVisible = networkStatus === "loading" && nodes.length === 0;
 
   const clearOverlayTimer = () => {
     if (clearTimerRef.current !== null) {
@@ -53,6 +55,17 @@ export function NetworkTransitionOverlay() {
   }, [currentNetwork, setNetworkTransitionVisible]);
 
   useEffect(() => {
+    if (isInitialLoadVisible) {
+      setNetworkTransitionVisible(true);
+      return;
+    }
+
+    if (!overlayState) {
+      setNetworkTransitionVisible(false);
+    }
+  }, [isInitialLoadVisible, overlayState, setNetworkTransitionVisible]);
+
+  useEffect(() => {
     if (!overlayState || overlayState.phase === "settling" || networkStatus === "loading") {
       return;
     }
@@ -67,17 +80,26 @@ export function NetworkTransitionOverlay() {
     }, OVERLAY_SETTLE_MS);
   }, [networkStatus, overlayState, setNetworkTransitionVisible]);
 
-  if (!overlayState) {
+  if (!overlayState && !isInitialLoadVisible) {
     return null;
   }
 
-  const networkLabel = overlayState.network === "mainnet" ? "Mainnet" : "Testnet";
+  const overlayNetwork = overlayState?.network ?? currentNetwork;
+  const networkLabel = overlayNetwork === "mainnet" ? "Mainnet" : "Testnet";
+  const eyebrow = overlayState ? "Switching network to" : "Fetching live data for";
+  const phaseClass = overlayState?.phase ?? "loading";
 
   return (
     <div className="network-transition" aria-hidden="true">
       <div
-        key={`${overlayState.key}-${overlayState.phase}`}
-        className={`network-transition__layer network-transition__layer--${overlayState.phase}`}
+        key={
+          overlayState
+            ? `${overlayState.key}-${overlayState.phase}`
+            : `initial-${overlayNetwork}-${networkStatus}`
+        }
+        className={`network-transition__layer network-transition__layer--${phaseClass} ${
+          !overlayState ? "network-transition__layer--initial" : ""
+        }`}
       >
         <div className="network-transition__veil" />
         <div className="network-transition__state">
@@ -86,7 +108,7 @@ export function NetworkTransitionOverlay() {
             <span className="network-transition__indicator-dot network-transition__indicator-dot--right" />
           </div>
           <div className="network-transition__copy">
-            <span className="network-transition__eyebrow">Switching network to</span>
+            <span className="network-transition__eyebrow">{eyebrow}</span>
             <span className="network-transition__label">{networkLabel}</span>
           </div>
         </div>

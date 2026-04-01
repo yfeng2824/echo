@@ -94,11 +94,28 @@
   animation: network-transition-state-enter 0.32s ease forwards;
 }
 
+.network-transition__layer--initial .network-transition__veil {
+  animation: none;
+  opacity: 1;
+}
+
+.network-transition__layer--initial .network-transition__state {
+  animation: network-transition-state-enter 0.32s ease forwards;
+}
+
 .network-transition__layer--loading .network-transition__indicator-dot--left {
   animation: network-transition-switch-left 1.8s ease-in-out infinite;
 }
 
 .network-transition__layer--loading .network-transition__indicator-dot--right {
+  animation: network-transition-switch-right 1.8s ease-in-out infinite;
+}
+
+.network-transition__layer--initial .network-transition__indicator-dot--left {
+  animation: network-transition-switch-left 1.8s ease-in-out infinite;
+}
+
+.network-transition__layer--initial .network-transition__indicator-dot--right {
   animation: network-transition-switch-right 1.8s ease-in-out infinite;
 }
 

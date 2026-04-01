@@ -23,7 +23,7 @@ const NODE_VIEW_INTERVALS = [0, 7, 12, 19, 24, 31] as const;
 const NODE_VIEW_DELAY_BY_DENSITY: Record<AudioDensity, { min: number; max: number }> = {
   sparse: { min: 2800, max: 3600 },
   balanced: { min: 2200, max: 3000 },
-  rich: { min: 1800, max: 2400 },
+  rich: { min: 1400, max: 2000 },
 };
 
 export type PlannedPhraseStep = {
