@@ -39,6 +39,19 @@ type PlanNodeViewPhraseInput = {
   phraseId: string;
 };
 
+type PlanNodeViewSecondaryResonanceInput = {
+  steps: PlannedPhraseStep[];
+  selectedNodeId: string;
+  registerBandMap: Map<string, RegisterBand>;
+  phraseId: string;
+};
+
+const SECONDARY_RESONANCE_DELAY_BASE_MS = 176;
+const SECONDARY_RESONANCE_DELAY_STEP_MS = 18;
+const SECONDARY_RESONANCE_DELAY_JITTER_MS = 24;
+const SECONDARY_RESONANCE_INTENSITY_FLOOR = 0.12;
+const SECONDARY_RESONANCE_INTENSITY_CEIL = 0.2;
+
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -188,4 +201,58 @@ export function planNodeViewPhrase({
   });
 
   return steps;
+}
+
+export function planNodeViewSecondaryResonance({
+  steps,
+  selectedNodeId,
+  registerBandMap,
+  phraseId,
+}: PlanNodeViewSecondaryResonanceInput): PlannedPhraseStep[] {
+  const selectedStep = steps.find((step) => step.event.nodeId === selectedNodeId);
+  if (!selectedStep) {
+    return [];
+  }
+
+  const peerSteps = steps.filter((step) => step.event.nodeId !== selectedNodeId);
+  if (peerSteps.length === 0) {
+    return [];
+  }
+
+  return peerSteps.map((peerStep, index) => {
+    const selectedIntensity = selectedStep.event.intensity;
+    const peerIntensity = peerStep.event.intensity;
+    const collisionNodeId =
+      selectedIntensity >= peerIntensity ? selectedNodeId : peerStep.event.nodeId;
+    const registerBand =
+      registerBandMap.get(collisionNodeId) ?? selectedStep.event.registerBand ?? 1;
+    const delayMs =
+      Math.max(selectedStep.delayMs, peerStep.delayMs) +
+      SECONDARY_RESONANCE_DELAY_BASE_MS +
+      SECONDARY_RESONANCE_DELAY_STEP_MS * index +
+      Math.round(
+        randomInRange(-SECONDARY_RESONANCE_DELAY_JITTER_MS, SECONDARY_RESONANCE_DELAY_JITTER_MS)
+      );
+    const intensity = clamp(
+      SECONDARY_RESONANCE_INTENSITY_FLOOR + peerIntensity * 0.08,
+      SECONDARY_RESONANCE_INTENSITY_FLOOR,
+      SECONDARY_RESONANCE_INTENSITY_CEIL
+    );
+
+    return {
+      delayMs,
+      event: {
+        id: `${phraseId}-collision-${index}-${collisionNodeId}`,
+        type: "node_active",
+        at: new Date().toISOString(),
+        nodeId: collisionNodeId,
+        intensity,
+        registerBand,
+        batchId: phraseId,
+        batchRole: "tail",
+        source: "resonance",
+        rippleLayer: 1,
+      },
+    };
+  });
 }

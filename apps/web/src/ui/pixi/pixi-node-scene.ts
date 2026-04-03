@@ -2,6 +2,7 @@ import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { EchoChannel, EchoEvent, EchoNode } from "@echo/contracts";
 import type {
   CollisionBurst,
+  NodeRipple,
   RenderCallbacks,
   RenderContext,
   RenderSnapshot,
@@ -9,7 +10,11 @@ import type {
 } from "./pixi-types";
 import { clamp, easeOutCubic, getNodeEntryState } from "./pixi-transition-layer";
 import { getDisplayNodeId } from "../../lib/node-id";
-import { getNodeViewPeerOrbits } from "../../lib/node-view-layout";
+import {
+  buildNodeViewLayout,
+  type NodeViewLayout,
+  type NodeViewLayoutPoint,
+} from "../../lib/node-view-layout";
 import {
   createProjectionTextureLayer,
   syncProjectionTexture,
@@ -35,12 +40,8 @@ type NodeSceneHoverState = {
   hoveredPeerNodeId: string | null;
 };
 
-type NodeLayoutPoint = {
-  x: number;
-  y: number;
-  size: number;
-  events: EchoEvent[];
-};
+const MOBILE_COLLISION_VIEWPORT_MAX_WIDTH = 900;
+const MAX_MOBILE_COLLISIONS_PER_RING = 3;
 
 export function createNodeSceneLayer() {
   const root = new Container();
@@ -63,7 +64,7 @@ export function createNodeSceneLayer() {
   label.visible = false;
   label.alpha = 0.74;
   label.roundPixels = true;
-  label.resolution = Math.min(window.devicePixelRatio || 1, 2);
+  label.resolution = Math.min(window.devicePixelRatio || 1, 3);
 
   root.addChild(mapSprite, lineGraphics, rippleGraphics, nodeGraphics, burstGraphics, label);
 
@@ -134,7 +135,11 @@ function getActiveChannelHighlights(
   return activeHighlights;
 }
 
-function buildNodeLayout(
+type NodeLayoutPoint = NodeViewLayoutPoint & {
+  events: EchoEvent[];
+};
+
+function buildNodeSceneLayout(
   nodes: EchoNode[],
   selectedNodeId: string,
   recentEvents: EchoEvent[],
@@ -144,54 +149,29 @@ function buildNodeLayout(
   entryEase: number,
   peerEntryEase: number
 ) {
-  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
-  if (!selectedNode) {
+  const baseLayout = buildNodeViewLayout(nodes, selectedNodeId, context, localLayoutSeed, {
+    entryEase,
+    peerEntryEase,
+    selectedNodeSize: 3 + entryEase * 5,
+    peerNodeSize: 4,
+  });
+
+  if (!baseLayout) {
     return null;
   }
 
-  const width = context.width;
-  const height = context.height;
-  const centerX = Math.round(width / 2);
-  const centerY = Math.round(height / 2);
-  const baseRadius = Math.min(width, height) * 0.31;
   const layout = new Map<string, NodeLayoutPoint>();
-  const selectedMapPosition = context.projection.project(selectedNode.lng, selectedNode.lat) ?? {
-    x: centerX,
-    y: centerY,
-  };
-  const anchorX = Math.round(selectedMapPosition.x + (centerX - selectedMapPosition.x) * entryEase);
-  const anchorY = Math.round(selectedMapPosition.y + (centerY - selectedMapPosition.y) * entryEase);
-
-  layout.set(selectedNode.id, {
-    x: anchorX,
-    y: anchorY,
-    size: 3 + entryEase * 5,
-    events: getVisibleNodeEvents(recentEvents, selectedNode.id, context, getVisualProfile),
-  });
-
-  const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
-  const peerOrbits = getNodeViewPeerOrbits(selectedNode, peers, localLayoutSeed);
-
-  peerOrbits.forEach(({ node: peer, angle, orbitDistance }) => {
-    const radius = baseRadius * orbitDistance;
-    const x = Math.round(anchorX + Math.cos(angle) * radius * peerEntryEase);
-    const y = Math.round(anchorY + Math.sin(angle) * radius * peerEntryEase);
-
-    layout.set(peer.id, {
-      x,
-      y,
-      size: 4,
-      events: getVisibleNodeEvents(recentEvents, peer.id, context, getVisualProfile),
+  for (const [nodeId, point] of baseLayout.layout.entries()) {
+    layout.set(nodeId, {
+      ...point,
+      events: getVisibleNodeEvents(recentEvents, nodeId, context, getVisualProfile),
     });
-  });
+  }
 
   return {
-    selectedNode,
-    peers: peerOrbits.map((entry) => entry.node),
+    ...baseLayout,
     layout,
-    anchorX,
-    anchorY,
-  };
+  } satisfies Omit<NodeViewLayout, "layout"> & { layout: Map<string, NodeLayoutPoint> };
 }
 
 function getNodeSceneTransitionEase(
@@ -314,7 +294,7 @@ export function findNodeScenePeerAtPoint(
   }
 
   const { entryEase, peerEntryEase } = getNodeEntryState(snapshot.nodeSceneEnteredAt, context.now);
-  const nodeLayout = buildNodeLayout(
+  const nodeLayout = buildNodeSceneLayout(
     snapshot.nodes,
     selectedNodeId,
     snapshot.recentEvents,
@@ -349,8 +329,7 @@ export function renderNodeScene(
   collisionHistory: Map<string, number>,
   collisionBursts: CollisionBurst[],
   callbacks: RenderCallbacks,
-  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile,
-  maxRippleLayer: number
+  getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
 ) {
   const { nodes, selectedNodeId, recentEvents, nodeSceneEnteredAt } = snapshot;
   const channels = snapshot.channels;
@@ -373,7 +352,7 @@ export function renderNodeScene(
     nodeSceneEnteredAt,
     context.now
   );
-  const targetLayout = buildNodeLayout(
+  const targetLayout = buildNodeSceneLayout(
     nodes,
     selectedNode.id,
     recentEvents,
@@ -391,7 +370,7 @@ export function renderNodeScene(
   const transitionEase = getNodeSceneTransitionEase(nodeTransition, selectedNode.id, context.now);
   const previousLayout =
     transitionEase < 1 && nodeTransition
-      ? buildNodeLayout(
+      ? buildNodeSceneLayout(
           nodes,
           nodeTransition.fromNodeId,
           recentEvents,
@@ -406,16 +385,7 @@ export function renderNodeScene(
   updateMapTexture(layer, context);
   layer.mapSprite.alpha = mapFade;
 
-  const activeRipples: Array<{
-    nodeId: string;
-    eventId: string;
-    batchId?: string;
-    x: number;
-    y: number;
-    radius: number;
-    intensity: number;
-    rippleLayer: number;
-  }> = [];
+  const activeRipples: NodeRipple[] = [];
   const activeChannelHighlights = getActiveChannelHighlights(
     recentEvents,
     context,
@@ -573,6 +543,29 @@ export function renderNodeScene(
     }
   });
 
+  const isMobileCollisionCapActive = context.width <= MOBILE_COLLISION_VIEWPORT_MAX_WIDTH;
+  const ringCollisionCounts = new Map<string, number>();
+
+  // Prune stale collision records and build per-ring collision counts for mobile caps.
+  for (const [key, createdAt] of collisionHistory.entries()) {
+    if (context.now - createdAt > 2600) {
+      collisionHistory.delete(key);
+      continue;
+    }
+
+    if (!isMobileCollisionCapActive) {
+      continue;
+    }
+
+    const [leftEventId, rightEventId] = key.split(":");
+    if (!leftEventId || !rightEventId) {
+      continue;
+    }
+
+    ringCollisionCounts.set(leftEventId, (ringCollisionCounts.get(leftEventId) ?? 0) + 1);
+    ringCollisionCounts.set(rightEventId, (ringCollisionCounts.get(rightEventId) ?? 0) + 1);
+  }
+
   for (let leftIndex = 0; leftIndex < activeRipples.length; leftIndex += 1) {
     const leftRipple = activeRipples[leftIndex];
     for (let rightIndex = leftIndex + 1; rightIndex < activeRipples.length; rightIndex += 1) {
@@ -603,6 +596,18 @@ export function renderNodeScene(
         continue;
       }
 
+      if (isMobileCollisionCapActive) {
+        const leftCollisionCount = ringCollisionCounts.get(leftRipple.eventId) ?? 0;
+        const rightCollisionCount = ringCollisionCounts.get(rightRipple.eventId) ?? 0;
+
+        if (
+          leftCollisionCount >= MAX_MOBILE_COLLISIONS_PER_RING ||
+          rightCollisionCount >= MAX_MOBILE_COLLISIONS_PER_RING
+        ) {
+          continue;
+        }
+      }
+
       const unitX = dx / distance;
       const unitY = dy / distance;
       const intersectionDistance =
@@ -622,11 +627,17 @@ export function renderNodeScene(
         leftNodeId: leftRipple.nodeId,
         rightNodeId: rightRipple.nodeId,
       });
+      callbacks.emitCollisionEcho(leftRipple, rightRipple, collisionKey);
 
-      const nextRippleLayer = Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1;
-
-      if (nextRippleLayer <= maxRippleLayer) {
-        callbacks.emitCollisionEcho(leftRipple, rightRipple, collisionKey);
+      if (isMobileCollisionCapActive) {
+        ringCollisionCounts.set(
+          leftRipple.eventId,
+          (ringCollisionCounts.get(leftRipple.eventId) ?? 0) + 1
+        );
+        ringCollisionCounts.set(
+          rightRipple.eventId,
+          (ringCollisionCounts.get(rightRipple.eventId) ?? 0) + 1
+        );
       }
     }
   }
@@ -643,12 +654,6 @@ export function renderNodeScene(
     layer.burstGraphics.stroke({ color: 0xffffff, alpha: alpha * 0.85, width: 2.4 });
     layer.burstGraphics.circle(burst.x, burst.y, 8 + progress * 32);
     layer.burstGraphics.stroke({ color: 0xffffff, alpha: alpha * 0.55, width: 1.8 });
-  }
-
-  for (const [key, createdAt] of collisionHistory.entries()) {
-    if (context.now - createdAt > 2600) {
-      collisionHistory.delete(key);
-    }
   }
 
   return nextBursts;

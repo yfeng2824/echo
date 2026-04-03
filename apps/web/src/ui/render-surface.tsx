@@ -54,9 +54,12 @@ export function RenderSurface() {
 
   const activeScene = useAppStore((state) => state.activeScene);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
+  const mapReturnTransition = useAppStore((state) => state.mapReturnTransition);
   const nodeSceneEnteredAt = useAppStore((state) => state.nodeSceneEnteredAt);
   const nodes = useAppStore((state) => state.nodes);
   const channels = useAppStore((state) => state.channels);
+  const onboardingStepId = useAppStore((state) => state.onboardingStepId);
+  const onboardingSpotlightNodeId = useAppStore((state) => state.onboardingSpotlightNodeId);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const recentEvents = useAppStore((state) => state.recentEvents);
   const secretCue = useAppStore((state) => state.secretCue);
@@ -75,7 +78,9 @@ export function RenderSurface() {
       root: mount,
       selectNode,
       appendEvent,
-      triggerEvent: (event) => audio?.trigger(event),
+      triggerEvent: (event) => {
+        audio?.trigger(event);
+      },
       getVisualProfile,
     });
     surfaceRef.current = surface;
@@ -100,23 +105,36 @@ export function RenderSurface() {
     surfaceRef.current?.setSnapshot({
       activeScene,
       mapSearchTransition,
+      mapReturnTransition,
       nodeSceneEnteredAt,
       nodes,
       channels,
       selectedNodeId,
       recentEvents,
       secretCue,
+      onboardingStepId,
+      onboardingSpotlightNodeId,
     });
   }, [
     activeScene,
     mapSearchTransition,
+    mapReturnTransition,
     nodeSceneEnteredAt,
     nodes,
     channels,
+    onboardingStepId,
+    onboardingSpotlightNodeId,
     selectedNodeId,
     recentEvents,
     secretCue,
   ]);
 
-  return <div ref={mountRef} className="render-surface-host" aria-hidden="true" />;
+  return (
+    <div
+      ref={mountRef}
+      className="render-surface-host"
+      data-onboarding-anchor="map-surface"
+      aria-hidden="true"
+    />
+  );
 }

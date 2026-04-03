@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useAppStore } from "../../state/app-store";
 import "../../scenes/scenes.css";
 import { getDisplayNodeId } from "../../lib/node-id";
+import { BackIcon, CaretDownIcon } from "../../ui/icons";
 import { NodeInfoCard } from "../../ui/node-info-card";
 
 const MOBILE_NODE_PANEL_MEDIA_QUERY = "(max-width: 767px)";
@@ -62,9 +63,7 @@ export function NodeResonanceScene() {
               <span className="scene__mobile-node-panel-label">Node info</span>
               <span className="scene__mobile-node-panel-value">{panelLabel}</span>
             </span>
-            <span className="scene__mobile-node-panel-caret" aria-hidden="true">
-              ▾
-            </span>
+            <CaretDownIcon className="scene__mobile-node-panel-caret" aria-hidden="true" />
           </button>
         ) : null}
 
@@ -83,7 +82,13 @@ export function NodeResonanceScene() {
             isMobilePanel ? "scene__action-controls--mobile-node" : ""
           }`}
         >
-          <button className="chrome-button" type="button" onClick={goToMap}>
+          <button
+            className="chrome-button"
+            type="button"
+            data-onboarding-anchor="return-to-map"
+            onClick={goToMap}
+          >
+            <BackIcon className="scene__action-icon" aria-hidden="true" />
             Return to map
           </button>
         </div>

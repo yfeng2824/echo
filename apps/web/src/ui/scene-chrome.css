@@ -51,6 +51,14 @@
   pointer-events: auto;
 }
 
+.scene-chrome--bottom-right {
+  right: var(--chrome-side, 40px);
+  bottom: var(--density-bottom-offset, 40px);
+  display: flex;
+  align-items: center;
+  pointer-events: auto;
+}
+
 .scene-chrome--top-right:hover,
 .scene-chrome--top-right.is-active {
   opacity: 0.92;
@@ -170,13 +178,13 @@
 .scene-chrome__search-shortcut kbd {
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 0;
-  padding: 0 8px;
   height: 18px;
+  width: 18px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
   color: rgba(255, 255, 255, 0.78);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1;
   font-family: inherit;
   letter-spacing: 0.04em;
@@ -306,11 +314,15 @@
   height: var(--chrome-control-height, 32px);
   padding: 0 16px;
   font-size: 12px;
-  line-height: var(--chrome-control-height, 32px);
+  line-height: 1;
   text-transform: uppercase;
   cursor: pointer;
   transition: all 0.3s ease;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .chrome-button:hover,
@@ -345,6 +357,43 @@
   position: relative;
   display: flex;
   align-items: center;
+}
+
+.scene-chrome__intro-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--chrome-control-height, 32px);
+  padding: 0;
+}
+
+.scene-chrome__intro-button.is-disabled {
+  opacity: 0.52;
+  cursor: default;
+}
+
+.scene-chrome__intro-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.scene-chrome__intro-panel {
+  min-width: 180px;
+}
+
+.scene-chrome__intro-option {
+  width: 100%;
+}
+
+.scene-chrome__button-icon,
+.scene-chrome__inline-icon,
+.scene-chrome__network-caret,
+.scene-chrome__mobile-menu-icon,
+.scene-chrome__check-icon {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
 }
 
 .scene-chrome__tooltip {
@@ -382,6 +431,24 @@
   position: relative;
 }
 
+.scene-chrome__mobile-menu-overlay {
+  position: fixed;
+  top: calc(var(--chrome-top, 24px) + var(--chrome-control-height, 44px) + 12px);
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: calc(var(--overlay-z, 30) + 4);
+}
+
+.scene-chrome__mobile-menu-backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0, 0, 0, 0.7);
+  backdrop-filter: blur(12px);
+  cursor: pointer;
+}
+
 .scene-chrome__mobile-menu-trigger {
   display: inline-flex;
   align-items: center;
@@ -402,29 +469,50 @@
 }
 
 .scene-chrome__mobile-menu-icon {
-  font-size: 15px;
-  line-height: 1;
+  width: 16px;
+  height: 16px;
 }
 
 .scene-chrome__mobile-menu-panel {
   position: absolute;
+  top: 0;
   right: 0;
-  top: calc(100% + 8px);
-  width: min(320px, calc(100vw - (var(--chrome-side, 12px) * 2)));
+  bottom: 0;
+  width: min(420px, 100vw);
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(0, 0, 0, 0.94);
-  backdrop-filter: blur(2px);
-  padding: 16px;
+  border-right: 0;
+  border-top: 0;
+  border-bottom: 0;
+  background: rgba(0, 0, 0, 0.72);
+  backdrop-filter: blur(18px);
+  padding: 84px 20px 24px;
   display: flex;
   flex-direction: column;
-  gap: 16px;
-  z-index: calc(var(--chrome-z, 20) + 1);
+  gap: 20px;
+  overflow-y: auto;
+  z-index: calc(var(--chrome-z, 20) + 2);
 }
 
 .scene-chrome__mobile-section {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.scene-chrome__mobile-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.scene-chrome__mobile-action-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.scene-chrome__mobile-action-row > .scene-chrome__mobile-action:only-child {
+  grid-column: 1 / -1;
 }
 
 .scene-chrome__mobile-network-row {
@@ -438,7 +526,7 @@
 }
 
 .scene-chrome__mobile-network-row--density {
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .scene-chrome__mobile-network-option {
@@ -462,8 +550,37 @@
 }
 
 .scene-chrome__mobile-network-option.is-active {
-  border-color: rgba(255, 255, 255, 0.38);
+  border: 2px solid rgba(255, 255, 255, 0.96);
   color: #fff;
+}
+
+.scene-chrome__mobile-action {
+  min-height: var(--chrome-control-height, 32px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: transparent;
+  color: rgba(255, 255, 255, 0.84);
+  font: inherit;
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  padding: 0 12px;
+  text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+}
+
+.scene-chrome__mobile-action:hover {
+  border-color: rgba(255, 255, 255, 0.36);
+  color: #fff;
+}
+
+.scene-chrome__mobile-action--split {
+  justify-content: center;
+  text-align: center;
 }
 
 .audio-controls__label {
@@ -524,8 +641,6 @@
 
 .scene-chrome__network-caret {
   color: rgba(255, 255, 255, 0.72);
-  font-size: 16px;
-  line-height: 1;
   transform: translateY(-1px);
 }
 
@@ -598,16 +713,22 @@
 }
 
 .scene-chrome__network-check {
-  width: 12px;
+  width: 14px;
   color: rgba(255, 255, 255, 0.9);
   text-align: center;
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .scene-chrome__mobile-network-check {
-  width: 12px;
+  width: 14px;
   flex: 0 0 auto;
   text-align: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .scene-chrome__secret-overlay {
@@ -726,6 +847,15 @@
     --chrome-control-height: 44px;
   }
 
+  .scene-chrome__sound-button {
+    width: var(--chrome-control-height, 44px);
+    padding: 0;
+  }
+
+  .scene-chrome__sound-button-label {
+    display: none;
+  }
+
   .scene-chrome__search-box input {
     padding-right: 48px;
   }
@@ -772,6 +902,10 @@
     display: none;
   }
 
+  .scene-chrome__intro-button {
+    display: none;
+  }
+
   .scene-chrome__root-menu {
     display: none;
   }
@@ -782,6 +916,10 @@
   }
 
   .scene-chrome--bottom-left {
+    display: none;
+  }
+
+  .scene-chrome--bottom-right {
     display: none;
   }
 
@@ -864,6 +1002,15 @@
   .scene-chrome__network-option {
     padding: 0 8px;
     font-size: 10px;
+  }
+
+  .scene-chrome__mobile-menu-panel {
+    width: 100vw;
+    padding: 24px 12px 20px;
+  }
+
+  .scene-chrome__mobile-action-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .scene-chrome__secret-code {

@@ -1,4 +1,11 @@
-import type { EchoChannel, EchoEvent, EchoNode, SceneId, SecretCueState } from "@echo/contracts";
+import type {
+  EchoChannel,
+  EchoEvent,
+  EchoNode,
+  OnboardingStepId,
+  SceneId,
+  SecretCueState,
+} from "@echo/contracts";
 import type { WorldMapProjection } from "../../lib/map-projection";
 
 export type MapSearchTransition = {
@@ -6,19 +13,28 @@ export type MapSearchTransition = {
   startedAt: number;
 } | null;
 
+export type MapReturnTransition = {
+  nodeId: string;
+  startedAt: number;
+} | null;
+
 export type RenderSnapshot = {
   activeScene: SceneId;
   mapSearchTransition: MapSearchTransition;
+  mapReturnTransition: MapReturnTransition;
   nodeSceneEnteredAt: number | null;
   nodes: EchoNode[];
   channels: EchoChannel[];
   selectedNodeId: string | null;
   recentEvents: EchoEvent[];
   secretCue: SecretCueState;
+  onboardingStepId: OnboardingStepId | null;
+  onboardingSpotlightNodeId: string | null;
 };
 
 export type HoverState = {
   hoveredNodeId: string | null;
+  isOnboardingHover?: boolean;
 };
 
 export type CollisionBurst = {

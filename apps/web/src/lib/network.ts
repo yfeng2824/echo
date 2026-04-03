@@ -27,6 +27,19 @@ export function buildRegisterBandMap(nodes: EchoNode[]): Map<string, RegisterBan
   return bandMap;
 }
 
+export function findMostConnectedNode(nodes: EchoNode[]) {
+  return (
+    [...nodes].sort((left, right) => {
+      const degreeDelta = right.peers.length - left.peers.length;
+      if (degreeDelta !== 0) {
+        return degreeDelta;
+      }
+
+      return left.id.localeCompare(right.id);
+    })[0] ?? null
+  );
+}
+
 function getNodeSearchTerms(node: EchoNode) {
   const rawId = node.id.toLowerCase();
   const peerId = node.peerId?.toLowerCase() ?? "";
