@@ -19,7 +19,11 @@ import {
 } from "../lib/fiber-dashboard-client";
 import { getNetworkMelodySpec, isNetworkMelodyEventType } from "../lib/network-event-melody";
 import { buildRegisterBandMap } from "../lib/network";
-import { pickNodeViewPhraseDelay, planNodeViewPhrase } from "../lib/node-view-audio";
+import {
+  pickNodeViewPhraseDelay,
+  planNodeViewPhrase,
+  planNodeViewSecondaryResonance,
+} from "../lib/node-view-audio";
 import { resolvePentatonicDegree, type ScaleDegreeKey } from "../lib/pentatonic";
 import { useSceneRouting } from "../scenes/use-scene-routing";
 import { useAppStore } from "../state/app-store";
@@ -257,9 +261,13 @@ export function App() {
   const applyEventFeed = useAppStore((state) => state.applyEventFeed);
   const activeScene = useAppStore((state) => state.activeScene);
   const currentNetwork = useAppStore((state) => state.currentNetwork);
+  const invalidNodeRouteId = useAppStore((state) => state.invalidNodeRouteId);
   const networkStatus = useAppStore((state) => state.networkStatus);
   const mapSearchTransition = useAppStore((state) => state.mapSearchTransition);
   const nodes = useAppStore((state) => state.nodes);
+  const onboardingStatus = useAppStore((state) => state.onboardingStatus);
+  const onboardingStepId = useAppStore((state) => state.onboardingStepId);
+  const onboardingSpotlightNodeId = useAppStore((state) => state.onboardingSpotlightNodeId);
   const selectedNodeId = useAppStore((state) => state.selectedNodeId);
   const audio = useAppStore((state) => state.audio);
   const audioEnabled = useAppStore((state) => state.audioEnabled);
@@ -267,6 +275,11 @@ export function App() {
   const secretCue = useAppStore((state) => state.secretCue);
   const networkTransitionVisible = useAppStore((state) => state.networkTransitionVisible);
   const setNetworkState = useAppStore((state) => state.setNetworkState);
+  const startOnboarding = useAppStore((state) => state.startOnboarding);
+  const completeOnboarding = useAppStore((state) => state.completeOnboarding);
+  const selectNode = useAppStore((state) => state.selectNode);
+  const startMapSearchTransition = useAppStore((state) => state.startMapSearchTransition);
+  const goToMap = useAppStore((state) => state.goToMap);
   const isSearchFocusPhase = activeScene === "map" && mapSearchTransition !== null;
   const previousSecretCueRef = useRef(secretCue);
 
@@ -431,6 +444,96 @@ export function App() {
     networkStatus,
     nodes,
     startupAudioReady,
+  ]);
+
+  useEffect(() => {
+    if (
+      onboardingStatus !== "inactive" ||
+      networkStatus !== "ready" ||
+      networkTransitionVisible ||
+      invalidNodeRouteId !== null ||
+      activeScene !== "map" ||
+      nodes.length === 0
+    ) {
+      return;
+    }
+
+    startOnboarding();
+  }, [
+    activeScene,
+    invalidNodeRouteId,
+    networkStatus,
+    networkTransitionVisible,
+    nodes.length,
+    onboardingStatus,
+    startOnboarding,
+  ]);
+
+  useEffect(() => {
+    if (onboardingStatus !== "active" || !onboardingStepId) {
+      return;
+    }
+
+    if (!onboardingSpotlightNodeId) {
+      completeOnboarding();
+      return;
+    }
+
+    if (
+      onboardingStepId === "map-pulse" ||
+      onboardingStepId === "connected-node" ||
+      onboardingStepId === "event-melodies"
+    ) {
+      if (activeScene === "node") {
+        goToMap();
+      }
+      return;
+    }
+
+    if (onboardingStepId === "node-view") {
+      if (activeScene === "node" && selectedNodeId === onboardingSpotlightNodeId) {
+        return;
+      }
+
+      if (activeScene === "map") {
+        if (mapSearchTransition?.nodeId !== onboardingSpotlightNodeId) {
+          startMapSearchTransition(onboardingSpotlightNodeId);
+          return;
+        }
+
+        const elapsed = Date.now() - mapSearchTransition.startedAt;
+        const remainingMs = Math.max(0, 950 - elapsed);
+        const timeoutId = window.setTimeout(() => {
+          const state = useAppStore.getState();
+          if (
+            state.onboardingStatus === "active" &&
+            state.onboardingStepId === "node-view" &&
+            state.mapSearchTransition?.nodeId === onboardingSpotlightNodeId
+          ) {
+            state.selectNode(onboardingSpotlightNodeId);
+          }
+        }, remainingMs);
+
+        return () => {
+          window.clearTimeout(timeoutId);
+        };
+      }
+
+      if (activeScene === "node" && selectedNodeId !== onboardingSpotlightNodeId) {
+        selectNode(onboardingSpotlightNodeId);
+      }
+    }
+  }, [
+    activeScene,
+    completeOnboarding,
+    goToMap,
+    mapSearchTransition,
+    onboardingSpotlightNodeId,
+    onboardingStatus,
+    onboardingStepId,
+    startMapSearchTransition,
+    selectNode,
+    selectedNodeId,
   ]);
 
   useEffect(() => {
@@ -614,24 +717,45 @@ export function App() {
     };
 
     const dispatchPhrase = () => {
+      const phraseId = `resonance-${Date.now()}`;
       const steps = planNodeViewPhrase({
         nodes,
         selectedNodeId: selectedNode.id,
         root: audioSettings.root,
         registerBandMap,
-        phraseId: `resonance-${Date.now()}`,
+        phraseId,
       });
 
       if (steps.length === 0) {
         return;
       }
 
+      const secondarySteps = planNodeViewSecondaryResonance({
+        steps,
+        selectedNodeId: selectedNode.id,
+        registerBandMap,
+        phraseId,
+      });
+      const allSteps = [...steps, ...secondarySteps].sort(
+        (left, right) => left.delayMs - right.delayMs
+      );
+
       phraseHoldUntil = Date.now() + NODE_VIEW_PHRASE_SETTLE_MS;
       clearScheduledSteps();
 
-      steps.forEach((step) => {
+      allSteps.forEach((step) => {
         const scheduledTimeoutId = window.setTimeout(() => {
           scheduledStepTimeouts.delete(scheduledTimeoutId);
+
+          const isSecondaryFallbackStep = (step.event.rippleLayer ?? 0) > 0;
+          const isTabVisible =
+            typeof document === "undefined" ? true : document.visibilityState === "visible";
+
+          // Secondary resonance fallback should only fire when visual collision audio
+          // may be throttled in a background tab.
+          if (isSecondaryFallbackStep && isTabVisible) {
+            return;
+          }
 
           const event = {
             ...step.event,

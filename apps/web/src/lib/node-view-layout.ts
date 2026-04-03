@@ -1,4 +1,5 @@
 import type { EchoNode } from "@echo/contracts";
+import type { WorldMapProjection } from "./map-projection";
 
 const FULL_TURN = Math.PI * 2;
 
@@ -6,6 +7,26 @@ export type NodeViewPeerOrbit = {
   node: EchoNode;
   angle: number;
   orbitDistance: number;
+};
+
+export type NodeViewLayoutPoint = {
+  x: number;
+  y: number;
+  size: number;
+};
+
+export type NodeViewLayout = {
+  selectedNode: EchoNode;
+  peers: EchoNode[];
+  layout: Map<string, NodeViewLayoutPoint>;
+  anchorX: number;
+  anchorY: number;
+};
+
+type NodeViewLayoutContext = {
+  width: number;
+  height: number;
+  projection: WorldMapProjection;
 };
 
 const MIN_ORBIT_DISTANCE = 0.7;
@@ -105,4 +126,68 @@ export function sortNodeViewPeerOrbits(orbits: NodeViewPeerOrbit[]) {
 
     return left.node.id.localeCompare(right.node.id);
   });
+}
+
+export function buildNodeViewLayout(
+  nodes: EchoNode[],
+  selectedNodeId: string,
+  context: NodeViewLayoutContext,
+  localLayoutSeed: number,
+  options?: {
+    entryEase?: number;
+    peerEntryEase?: number;
+    selectedNodeSize?: number;
+    peerNodeSize?: number;
+  }
+) {
+  const selectedNode = nodes.find((node) => node.id === selectedNodeId);
+  if (!selectedNode) {
+    return null;
+  }
+
+  const width = context.width;
+  const height = context.height;
+  const centerX = Math.round(width / 2);
+  const centerY = Math.round(height / 2);
+  const entryEase = options?.entryEase ?? 1;
+  const peerEntryEase = options?.peerEntryEase ?? 1;
+  const selectedNodeSize = options?.selectedNodeSize ?? 8;
+  const peerNodeSize = options?.peerNodeSize ?? 4;
+  const baseRadius = Math.min(width, height) * 0.31;
+  const layout = new Map<string, NodeViewLayoutPoint>();
+  const selectedMapPosition = context.projection.project(selectedNode.lng, selectedNode.lat) ?? {
+    x: centerX,
+    y: centerY,
+  };
+  const anchorX = Math.round(selectedMapPosition.x + (centerX - selectedMapPosition.x) * entryEase);
+  const anchorY = Math.round(selectedMapPosition.y + (centerY - selectedMapPosition.y) * entryEase);
+
+  layout.set(selectedNode.id, {
+    x: anchorX,
+    y: anchorY,
+    size: selectedNodeSize,
+  });
+
+  const peers = nodes.filter((node) => selectedNode.peers.includes(node.id));
+  const peerOrbits = getNodeViewPeerOrbits(selectedNode, peers, localLayoutSeed);
+
+  peerOrbits.forEach(({ node: peer, angle, orbitDistance }) => {
+    const radius = baseRadius * orbitDistance;
+    const x = Math.round(anchorX + Math.cos(angle) * radius * peerEntryEase);
+    const y = Math.round(anchorY + Math.sin(angle) * radius * peerEntryEase);
+
+    layout.set(peer.id, {
+      x,
+      y,
+      size: peerNodeSize,
+    });
+  });
+
+  return {
+    selectedNode,
+    peers: peerOrbits.map((entry) => entry.node),
+    layout,
+    anchorX,
+    anchorY,
+  } satisfies NodeViewLayout;
 }

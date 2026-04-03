@@ -12,6 +12,15 @@ export type SecretCueWord = "echo" | "ckb" | "fiber";
 
 export type SecretCuePhase = "idle" | "typing" | "playing";
 
+export type OnboardingStatus = "inactive" | "active" | "completed" | "dismissed";
+
+export type OnboardingStepId =
+  | "map-pulse"
+  | "connected-node"
+  | "event-melodies"
+  | "node-view"
+  | "controls";
+
 export type SecretCueState = {
   phase: SecretCuePhase;
   word: SecretCueWord | null;

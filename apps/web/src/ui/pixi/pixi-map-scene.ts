@@ -1,12 +1,18 @@
 import { Container, Graphics, Text, TextStyle } from "pixi.js";
 import type { EchoEvent, EchoNode } from "@echo/contracts";
+import {
+  buildMapNodeLayout,
+  getMapVerticalOffset,
+  type MapNodeLayout,
+} from "../../lib/map-node-layout";
 import { getDisplayNodeId } from "../../lib/node-id";
+import { buildNodeViewLayout, getNodeViewLayoutSeed } from "../../lib/node-view-layout";
 import {
   createProjectionTextureLayer,
   syncProjectionTexture,
   type ProjectionTextureLayer,
 } from "./pixi-projection-texture";
-import { getMapSearchFocusState } from "./pixi-transition-layer";
+import { getMapReturnState, getMapSearchFocusState } from "./pixi-transition-layer";
 import type { HoverState, RenderContext, RenderSnapshot, VisualProfile } from "./pixi-types";
 
 type MapSceneLayer = ProjectionTextureLayer & {
@@ -49,13 +55,13 @@ export function createMapSceneLayer() {
   hoverLabels.forEach((text, index) => {
     text.alpha = 0.4;
     text.roundPixels = true;
-    text.resolution = Math.min(window.devicePixelRatio || 1, 2);
+    text.resolution = Math.min(window.devicePixelRatio || 1, 3);
     text.y = index * 15;
     hoverInfo.addChild(text);
   });
   hoverValues.forEach((text, index) => {
     text.roundPixels = true;
-    text.resolution = Math.min(window.devicePixelRatio || 1, 2);
+    text.resolution = Math.min(window.devicePixelRatio || 1, 3);
     text.y = index * 15;
     text.x = 116;
     hoverInfo.addChild(text);
@@ -103,141 +109,6 @@ function getVisibleNodeEvents(
   });
 
   return activePriorityEvents.length > 0 ? activePriorityEvents : nodeEvents;
-}
-
-function getMapPosition(node: EchoNode, context: RenderContext) {
-  return (
-    context.projection.project(node.lng, node.lat) ?? {
-      x: context.width / 2,
-      y: context.height / 2,
-    }
-  );
-}
-
-type MapNodeLayout = {
-  anchorX: number;
-  anchorY: number;
-  x: number;
-  y: number;
-};
-
-function getMapVerticalOffset(width: number, height: number) {
-  const base = Math.max(12, Math.min(48, Math.round(height * 0.06)));
-
-  if (width <= 480) {
-    return Math.max(10, base - 8);
-  }
-
-  if (width <= 767) {
-    return Math.max(12, base - 4);
-  }
-
-  if (width <= 1199) {
-    return base;
-  }
-
-  return Math.max(28, base);
-}
-const MAP_STACK_THRESHOLD_PX = 6;
-const MAP_STACK_BASE_RADIUS_PX = 8;
-const MAP_STACK_RING_STEP_PX = 7;
-const MAP_STACK_RING_CAPACITY = 6;
-
-function buildMapNodeLayout(nodes: EchoNode[], context: RenderContext) {
-  const projectedNodes = nodes.map((node) => {
-    const projected = getMapPosition(node, context);
-    return {
-      node,
-      x: projected.x,
-      y: projected.y,
-    };
-  });
-
-  const parents = projectedNodes.map((_, index) => index);
-
-  const find = (index: number): number => {
-    if (parents[index] !== index) {
-      parents[index] = find(parents[index]);
-    }
-
-    return parents[index];
-  };
-
-  const union = (left: number, right: number) => {
-    const leftRoot = find(left);
-    const rightRoot = find(right);
-
-    if (leftRoot !== rightRoot) {
-      parents[rightRoot] = leftRoot;
-    }
-  };
-
-  for (let left = 0; left < projectedNodes.length; left += 1) {
-    for (let right = left + 1; right < projectedNodes.length; right += 1) {
-      const deltaX = projectedNodes[left].x - projectedNodes[right].x;
-      const deltaY = projectedNodes[left].y - projectedNodes[right].y;
-      if (Math.hypot(deltaX, deltaY) <= MAP_STACK_THRESHOLD_PX) {
-        union(left, right);
-      }
-    }
-  }
-
-  const groups = new Map<number, typeof projectedNodes>();
-  projectedNodes.forEach((entry, index) => {
-    const root = find(index);
-    const existing = groups.get(root);
-    if (existing) {
-      existing.push(entry);
-    } else {
-      groups.set(root, [entry]);
-    }
-  });
-
-  const layout = new Map<string, MapNodeLayout>();
-
-  groups.forEach((group) => {
-    const anchorX = group.reduce((sum, entry) => sum + entry.x, 0) / group.length;
-    const anchorY = group.reduce((sum, entry) => sum + entry.y, 0) / group.length;
-    const sortedGroup = [...group].sort((left, right) => left.node.id.localeCompare(right.node.id));
-
-    if (sortedGroup.length === 1) {
-      layout.set(sortedGroup[0].node.id, {
-        anchorX,
-        anchorY,
-        x: anchorX,
-        y: anchorY,
-      });
-      return;
-    }
-
-    let slotOffset = 0;
-    let remaining = sortedGroup.length;
-    let ringIndex = 0;
-
-    while (remaining > 0) {
-      const ringCount = Math.min(remaining, MAP_STACK_RING_CAPACITY * (ringIndex === 0 ? 1 : 2));
-      const radius = MAP_STACK_BASE_RADIUS_PX + ringIndex * MAP_STACK_RING_STEP_PX;
-      const ringRotation = ringIndex % 2 === 0 ? -Math.PI / 2 : -Math.PI / 2 + Math.PI / ringCount;
-
-      for (let index = 0; index < ringCount; index += 1) {
-        const entry = sortedGroup[slotOffset + index];
-        const angle = ringRotation + (Math.PI * 2 * index) / ringCount;
-
-        layout.set(entry.node.id, {
-          anchorX,
-          anchorY,
-          x: anchorX + Math.cos(angle) * radius,
-          y: anchorY + Math.sin(angle) * radius,
-        });
-      }
-
-      slotOffset += ringCount;
-      remaining -= ringCount;
-      ringIndex += 1;
-    }
-  });
-
-  return layout;
 }
 
 export function findMapNodeAtPoint(
@@ -329,6 +200,52 @@ function getVisibleRipples(
   }
 
   return isTransitionNode ? activeRipples.slice(0, 1) : [];
+}
+
+function getReturnStartPosition(
+  node: EchoNode,
+  mapNodeLayout: Map<string, MapNodeLayout>,
+  returnLayout: ReturnType<typeof buildNodeViewLayout>,
+  context: RenderContext
+) {
+  const target = mapNodeLayout.get(node.id);
+  const targetX = target?.x ?? context.width / 2;
+  const targetY = target?.y ?? context.height / 2;
+
+  if (!returnLayout) {
+    return { x: targetX, y: targetY };
+  }
+
+  const layoutPoint = returnLayout.layout.get(node.id);
+  if (layoutPoint) {
+    return {
+      x: layoutPoint.x,
+      y: layoutPoint.y,
+    };
+  }
+
+  return {
+    x: targetX,
+    y: targetY,
+  };
+}
+
+function getReturnNodePosition(
+  node: EchoNode,
+  mapNodeLayout: Map<string, MapNodeLayout>,
+  returnLayout: ReturnType<typeof buildNodeViewLayout>,
+  easedReturn: number,
+  context: RenderContext
+) {
+  const target = mapNodeLayout.get(node.id);
+  const targetX = target?.x ?? context.width / 2;
+  const targetY = target?.y ?? context.height / 2;
+  const start = getReturnStartPosition(node, mapNodeLayout, returnLayout, context);
+
+  return {
+    x: start.x + (targetX - start.x) * easedReturn,
+    y: start.y + (targetY - start.y) * easedReturn,
+  };
 }
 
 function getPulse(
@@ -435,11 +352,33 @@ export function renderMapScene(
   context: RenderContext,
   getVisualProfile: (event: EchoEvent, scene: "map" | "node") => VisualProfile
 ) {
-  const { nodes, channels, mapSearchTransition, recentEvents } = snapshot;
+  const { nodes, channels, mapSearchTransition, mapReturnTransition, recentEvents } = snapshot;
   const isCoarsePointer = window.matchMedia("(pointer: coarse)").matches;
   const mapNodeLayout = buildMapNodeLayout(nodes, context);
+  const returnTransitionNode = mapReturnTransition
+    ? (nodes.find((node) => node.id === mapReturnTransition.nodeId) ?? null)
+    : null;
+  const returnState = getMapReturnState(mapReturnTransition?.startedAt ?? null, context.now);
+  const hasMapReturnTransition = returnTransitionNode !== null && returnState.isActive;
+  const returnLayout = hasMapReturnTransition
+    ? buildNodeViewLayout(
+        nodes,
+        returnTransitionNode.id,
+        context,
+        getNodeViewLayoutSeed(returnTransitionNode.id),
+        {
+          entryEase: 1,
+          peerEntryEase: 1,
+          selectedNodeSize: 8,
+          peerNodeSize: 4,
+        }
+      )
+    : null;
+  const allowGuidedHoverInfo = hoverState.isOnboardingHover === true;
   const hoveredNode =
-    !isCoarsePointer && hoverState.hoveredNodeId
+    (!isCoarsePointer || allowGuidedHoverInfo) &&
+    !hasMapReturnTransition &&
+    hoverState.hoveredNodeId
       ? (nodes.find((node) => node.id === hoverState.hoveredNodeId) ?? null)
       : null;
   const connectedNodeIds = new Set<string>();
@@ -469,13 +408,33 @@ export function renderMapScene(
   applyMapFocusTransform(layer, context, transitionPosition, easedFocus);
 
   updateMapTexture(layer, context);
-  layer.mapSprite.alpha = 1;
+  layer.mapSprite.alpha = hasMapReturnTransition ? returnState.easedReturn : 1;
 
   layer.ripples.clear();
   layer.links.clear();
   layer.halos.clear();
   layer.cores.clear();
   layer.hoverInfo.visible = false;
+
+  if (returnLayout) {
+    returnLayout.peers.forEach((peer) => {
+      const selectedStart = getReturnStartPosition(
+        returnLayout.selectedNode,
+        mapNodeLayout,
+        returnLayout,
+        context
+      );
+      const peerStart = getReturnStartPosition(peer, mapNodeLayout, returnLayout, context);
+
+      layer.links.moveTo(selectedStart.x, selectedStart.y);
+      layer.links.lineTo(peerStart.x, peerStart.y);
+      layer.links.stroke({
+        color: 0xffffff,
+        alpha: 0.15 * returnState.remaining,
+        width: 1 + returnState.remaining * 0.6,
+      });
+    });
+  }
 
   if (hoveredNode && !hasTransitionNode) {
     const hoveredLayout = mapNodeLayout.get(hoveredNode.id);
@@ -503,8 +462,16 @@ export function renderMapScene(
 
   nodes.forEach((node, index) => {
     const layout = mapNodeLayout.get(node.id);
-    const x = layout?.x ?? context.width / 2;
-    const y = layout?.y ?? context.height / 2;
+    const isReturningClusterNode =
+      hasMapReturnTransition && Boolean(returnLayout?.layout.has(node.id));
+    const position = isReturningClusterNode
+      ? getReturnNodePosition(node, mapNodeLayout, returnLayout, returnState.easedReturn, context)
+      : {
+          x: layout?.x ?? context.width / 2,
+          y: layout?.y ?? context.height / 2,
+        };
+    const x = position.x;
+    const y = position.y;
     const isTransitionNode = transitionNode?.id === node.id;
     const activeRipples = getActiveRipples(
       getVisibleNodeEvents(recentEvents, node.id, context, getVisualProfile),
@@ -517,7 +484,7 @@ export function renderMapScene(
     const totalPulse = pulse + secretCuePulse * 0.95;
     const isHovered = hoverState.hoveredNodeId === node.id;
     const isConnectedToHovered = connectedNodeIds.has(node.id);
-    const hasHoverContext = hoveredNode !== null && !hasTransitionNode;
+    const hasHoverContext = hoveredNode !== null && !hasTransitionNode && !hasMapReturnTransition;
     const halo = getHaloRadius(
       totalPulse,
       isHovered,
@@ -567,13 +534,17 @@ export function renderMapScene(
         ? isTransitionNode
           ? 0.06 + pulse * 0.12
           : 0.02
-        : hasHoverContext
-          ? isHovered
-            ? 0.12 + totalPulse * 0.16
-            : isConnectedToHovered
-              ? 0.07 + totalPulse * 0.11
-              : 0.015 + totalPulse * 0.04
-          : 0.04 + totalPulse * 0.12 + (isHovered ? 0.06 : 0),
+        : hasMapReturnTransition
+          ? isReturningClusterNode
+            ? 0.04 + totalPulse * 0.12
+            : 0.04 + totalPulse * 0.12
+          : hasHoverContext
+            ? isHovered
+              ? 0.12 + totalPulse * 0.16
+              : isConnectedToHovered
+                ? 0.07 + totalPulse * 0.11
+                : 0.015 + totalPulse * 0.04
+            : 0.04 + totalPulse * 0.12 + (isHovered ? 0.06 : 0),
     });
 
     layer.cores.circle(x, y, Math.max(2.4, coreRadius + secretCuePulse * 0.9));
@@ -583,16 +554,25 @@ export function renderMapScene(
         ? isTransitionNode
           ? 0.96
           : 0.34
-        : hasHoverContext
-          ? isHovered
-            ? 0.98
-            : isConnectedToHovered
-              ? 0.76
-              : 0.24
-          : Math.min(1, 0.85 + secretCuePulse * 0.08),
+        : hasMapReturnTransition
+          ? isReturningClusterNode
+            ? Math.min(1, 0.85 + secretCuePulse * 0.08)
+            : Math.min(1, 0.85 + secretCuePulse * 0.08)
+          : hasHoverContext
+            ? isHovered
+              ? 0.98
+              : isConnectedToHovered
+                ? 0.76
+                : 0.24
+            : Math.min(1, 0.85 + secretCuePulse * 0.08),
     });
 
-    if (!hasTransitionNode && isHovered && !isCoarsePointer) {
+    if (
+      !hasTransitionNode &&
+      !hasMapReturnTransition &&
+      isHovered &&
+      (!isCoarsePointer || allowGuidedHoverInfo)
+    ) {
       const activeChannelCount = channels.filter(
         (channel) => channel.sourceNodeId === node.id || channel.targetNodeId === node.id
       ).length;

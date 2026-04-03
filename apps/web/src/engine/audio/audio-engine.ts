@@ -194,6 +194,7 @@ function isSecretCueEvent(event: EchoEvent) {
 
 export function createAudioEngine(): AudioEngine {
   let enabled = false;
+  let onboardingIsolationActive = false;
   let audioContext: AudioContext | null = null;
   let ambientMaster: GainNode | null = null;
   let ambientBedVoices: Array<{
@@ -208,6 +209,7 @@ export function createAudioEngine(): AudioEngine {
   let networkMelodyTimeoutIds = new Set<number>();
   let networkMelodyPendingEvent: EchoEvent | null = null;
   let networkMelodyDrainTimeoutId: number | null = null;
+  let onboardingIsolationReleaseTimeoutId: number | null = null;
   let secretCueTimeoutIds = new Set<number>();
   let secretCueReleaseTimeoutId: number | null = null;
   let secretCueActiveUntil = 0;
@@ -254,6 +256,13 @@ export function createAudioEngine(): AudioEngine {
     if (networkMelodyDrainTimeoutId !== null) {
       window.clearTimeout(networkMelodyDrainTimeoutId);
       networkMelodyDrainTimeoutId = null;
+    }
+  };
+
+  const clearOnboardingIsolationReleaseTimeout = () => {
+    if (onboardingIsolationReleaseTimeoutId !== null) {
+      window.clearTimeout(onboardingIsolationReleaseTimeoutId);
+      onboardingIsolationReleaseTimeoutId = null;
     }
   };
 
@@ -306,7 +315,7 @@ export function createAudioEngine(): AudioEngine {
   };
 
   const resumeAmbientIfNeeded = () => {
-    if (!enabled || isSecretCueActive()) {
+    if (!enabled || isSecretCueActive() || onboardingIsolationActive) {
       return;
     }
 
@@ -484,11 +493,7 @@ export function createAudioEngine(): AudioEngine {
     clearNetworkMelodyTimers();
     networkMelodyPendingEvent = null;
 
-    const lastDelay = melodySpec.steps[melodySpec.steps.length - 1]?.delayMs ?? 0;
-    const priorityDuration = Math.max(
-      NETWORK_MELODY_PRIORITY_FLOOR_MS,
-      Math.min(NETWORK_MELODY_PRIORITY_CAP_MS, lastDelay + NETWORK_MELODY_TAIL_ALLOWANCE_MS)
-    );
+    const priorityDuration = getNetworkMelodyPriorityDuration(melodySpec);
     networkMelodyActiveUntil = Date.now() + priorityDuration;
 
     melodySpec.steps.forEach((step, index) => {
@@ -527,6 +532,79 @@ export function createAudioEngine(): AudioEngine {
         playNetworkMelody(pendingEvent);
       }
     }, priorityDuration);
+  };
+
+  const getNetworkMelodyPriorityDuration = (
+    melodySpec: NonNullable<ReturnType<typeof getNetworkMelodySpec>>
+  ) => {
+    const lastDelay = melodySpec.steps[melodySpec.steps.length - 1]?.delayMs ?? 0;
+    return Math.max(
+      NETWORK_MELODY_PRIORITY_FLOOR_MS,
+      Math.min(NETWORK_MELODY_PRIORITY_CAP_MS, lastDelay + NETWORK_MELODY_TAIL_ALLOWANCE_MS)
+    );
+  };
+
+  const setOnboardingIsolationState = (active: boolean) => {
+    onboardingIsolationActive = active;
+    clearOnboardingIsolationReleaseTimeout();
+    resetNetworkMelodyState();
+
+    if (!enabled) {
+      return;
+    }
+
+    if (active) {
+      stopAmbient(0.12);
+      stopTransientVoices(0.05);
+      return;
+    }
+
+    stopTransientVoices(0.05);
+    resumeAmbientIfNeeded();
+  };
+
+  const replayOnboardingNetworkMelody = (event: EchoEvent) => {
+    if (!enabled || !isNetworkMelodyEventType(event.type)) {
+      return;
+    }
+
+    const melodySpec = getNetworkMelodySpec(
+      event,
+      event.registerBand ?? topologyBands.get(event.nodeId) ?? 2
+    );
+    if (!melodySpec) {
+      return;
+    }
+
+    setOnboardingIsolationState(true);
+    playNetworkMelody({
+      ...event,
+      at: new Date().toISOString(),
+      source: "network",
+    });
+
+    onboardingIsolationReleaseTimeoutId = window.setTimeout(() => {
+      onboardingIsolationReleaseTimeoutId = null;
+      setOnboardingIsolationState(false);
+    }, getNetworkMelodyPriorityDuration(melodySpec));
+  };
+
+  const playOnboardingNetworkMelodyByType = (
+    eventType: Extract<EchoEventType, "channel_opened" | "channel_updated" | "channel_closed">,
+    nodeId?: string | null
+  ) => {
+    const previewNodeId = nodeId ?? "onboarding-preview";
+    const registerBand = (nodeId ? topologyBands.get(nodeId) : null) ?? 2;
+
+    replayOnboardingNetworkMelody({
+      id: `onboarding-${eventType}-${Date.now()}`,
+      type: eventType,
+      at: new Date().toISOString(),
+      nodeId: previewNodeId,
+      intensity: 0.78,
+      registerBand,
+      source: "network",
+    });
   };
 
   const cleanupVoices = () => {
@@ -945,6 +1023,9 @@ export function createAudioEngine(): AudioEngine {
     stopSecretCue() {
       stopActiveSecretCue();
     },
+    playOnboardingEventMelody(eventType, nodeId) {
+      playOnboardingNetworkMelodyByType(eventType, nodeId);
+    },
     enable() {
       enabled = true;
       void ensureAudioContext();
@@ -952,6 +1033,7 @@ export function createAudioEngine(): AudioEngine {
     disable() {
       enabled = false;
       secretCueActiveUntil = 0;
+      clearOnboardingIsolationReleaseTimeout();
       stopAmbient(0.5);
       resetNetworkMelodyState();
       clearSecretCueTimers();
@@ -970,6 +1052,11 @@ export function createAudioEngine(): AudioEngine {
         return;
       }
 
+      if (onboardingIsolationActive) {
+        stopAmbient(0.14);
+        return;
+      }
+
       if (scene === "map") {
         void startAmbient(nodes);
         return;
@@ -979,6 +1066,10 @@ export function createAudioEngine(): AudioEngine {
     },
     trigger(event: EchoEvent) {
       if (!enabled) {
+        return;
+      }
+
+      if (onboardingIsolationActive) {
         return;
       }
 
@@ -1004,7 +1095,9 @@ export function createAudioEngine(): AudioEngine {
     },
     dispose() {
       enabled = false;
+      onboardingIsolationActive = false;
       secretCueActiveUntil = 0;
+      clearOnboardingIsolationReleaseTimeout();
       stopAmbient(0.1);
       resetNetworkMelodyState();
       clearSecretCueTimers();

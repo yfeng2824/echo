@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { EchoChannel, EchoNode } from "@echo/contracts";
 import { getDisplayNodeId, getFullNodeId } from "../lib/node-id";
+import { CopyIcon } from "./icons";
 
 type NodeInfoCardProps = {
   node: EchoNode | null;
@@ -98,7 +99,7 @@ export function NodeInfoCard({ node, channels, visible }: NodeInfoCardProps) {
   };
 
   return (
-    <div className="scene__card">
+    <div className="scene__card" data-onboarding-anchor="node-card">
       <div className="scene__card-row">
         <span className="scene__card-label">ID</span>
         <span className="scene__card-value scene__card-value--inline">
@@ -119,7 +120,7 @@ export function NodeInfoCard({ node, channels, visible }: NodeInfoCardProps) {
               aria-label={`Copy ${displayNodeId}`}
               title="Copy full node ID"
             >
-              <span className="scene__copy-icon" aria-hidden="true" />
+              <CopyIcon className="scene__copy-icon" aria-hidden="true" />
             </button>
           </span>
         </span>
@@ -158,7 +159,6 @@ export function NodeInfoCard({ node, channels, visible }: NodeInfoCardProps) {
           style={activeChannelsTooltipStyle ?? undefined}
           role="tooltip"
         >
-          <span className="scene__card-inline-tooltip-label">Count: </span>
           <span className="scene__card-inline-tooltip-value">Excludes closed channels</span>
         </span>
       ) : null}

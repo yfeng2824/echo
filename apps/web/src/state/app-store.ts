@@ -9,6 +9,8 @@ import type {
   EchoNode,
   HeadlineCounts,
   NetworkSimulation,
+  OnboardingStatus,
+  OnboardingStepId,
   SceneId,
   SecretCueState,
   SecretCueWord,
@@ -19,6 +21,7 @@ import {
   SECRET_PROMPT_HIDE_AT_MS,
   SECRET_PROMPT_RELEASE_AT_MS,
 } from "../lib/secret-cue";
+import { findMostConnectedNode } from "../lib/network";
 
 type InitializeInput = {
   simulation: NetworkSimulation;
@@ -42,6 +45,20 @@ type MapSearchTransition = {
   startedAt: number;
 };
 
+type MapReturnTransition = {
+  nodeId: string;
+  startedAt: number;
+};
+
+const ONBOARDING_STORAGE_KEY = "echo-onboarding-v1";
+const ONBOARDING_STEP_ORDER: OnboardingStepId[] = [
+  "map-pulse",
+  "connected-node",
+  "event-melodies",
+  "node-view",
+  "controls",
+];
+
 type AppState = {
   activeScene: SceneId;
   currentNetwork: EchoNetwork;
@@ -52,9 +69,13 @@ type AppState = {
   selectedNodeId: string | null;
   nodeSceneEnteredAt: number | null;
   mapSearchTransition: MapSearchTransition | null;
+  mapReturnTransition: MapReturnTransition | null;
   audioEnabled: boolean;
   audioSettings: AudioSettings;
   secretCue: SecretCueState;
+  onboardingStatus: OnboardingStatus;
+  onboardingStepId: OnboardingStepId | null;
+  onboardingSpotlightNodeId: string | null;
   nodes: EchoNode[];
   channels: EchoChannel[];
   recentEvents: EchoEvent[];
@@ -76,6 +97,13 @@ type AppState = {
   goToMap: () => void;
   setAudioSettings: (nextSettings: Partial<AudioSettings>) => void;
   toggleAudio: () => void;
+  startOnboarding: () => void;
+  previousOnboardingStep: () => void;
+  nextOnboardingStep: () => void;
+  skipOnboarding: () => void;
+  completeOnboarding: () => void;
+  replayOnboarding: () => void;
+  setOnboardingSpotlightNode: (nodeId: string | null) => void;
   beginSecretWord: (word: SecretCueWord, initialChar: string) => void;
   advanceSecretWord: (nextMatchedText: string) => void;
   triggerSecretCue: () => void;
@@ -103,6 +131,65 @@ const defaultSecretCue: SecretCueState = {
   promptReleaseAt: null,
   promptHideAt: null,
 };
+
+function getInitialOnboardingStatus(): OnboardingStatus {
+  if (typeof window === "undefined") {
+    return "inactive";
+  }
+
+  const saved = window.localStorage.getItem(ONBOARDING_STORAGE_KEY);
+  return saved === "completed" || saved === "dismissed" ? saved : "inactive";
+}
+
+function persistOnboardingStatus(status: OnboardingStatus) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (status === "completed" || status === "dismissed") {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, status);
+    return;
+  }
+
+  window.localStorage.removeItem(ONBOARDING_STORAGE_KEY);
+}
+
+function getNextOnboardingStep(step: OnboardingStepId | null): OnboardingStepId | null {
+  if (!step) {
+    return ONBOARDING_STEP_ORDER[0] ?? null;
+  }
+
+  const currentIndex = ONBOARDING_STEP_ORDER.indexOf(step);
+  if (currentIndex === -1 || currentIndex === ONBOARDING_STEP_ORDER.length - 1) {
+    return null;
+  }
+
+  return ONBOARDING_STEP_ORDER[currentIndex + 1] ?? null;
+}
+
+function getPreviousOnboardingStep(step: OnboardingStepId | null): OnboardingStepId | null {
+  if (!step) {
+    return null;
+  }
+
+  const currentIndex = ONBOARDING_STEP_ORDER.indexOf(step);
+  if (currentIndex <= 0) {
+    return null;
+  }
+
+  return ONBOARDING_STEP_ORDER[currentIndex - 1] ?? null;
+}
+
+function resolveOnboardingSpotlightNodeId(
+  nodes: EchoNode[],
+  currentSpotlightNodeId: string | null = null
+) {
+  if (currentSpotlightNodeId && nodes.some((node) => node.id === currentSpotlightNodeId)) {
+    return currentSpotlightNodeId;
+  }
+
+  return findMostConnectedNode(nodes)?.id ?? null;
+}
 
 function derivePeersFromChannels(nodes: EchoNode[], channels: EchoChannel[]) {
   const peerSets = new Map(nodes.map((node) => [node.id, new Set<string>()]));
@@ -202,11 +289,11 @@ function applyChannelLifecycleEvent(nodes: EchoNode[], channels: EchoChannel[], 
 
 function getInitialNetwork(): EchoNetwork {
   if (typeof window === "undefined") {
-    return "testnet";
+    return "mainnet";
   }
 
   const saved = window.localStorage.getItem("echo-network");
-  return saved === "mainnet" || saved === "testnet" ? saved : "testnet";
+  return saved === "mainnet" || saved === "testnet" ? saved : "mainnet";
 }
 
 function getInitialAudioSettings(): AudioSettings {
@@ -269,9 +356,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   selectedNodeId: null,
   nodeSceneEnteredAt: null,
   mapSearchTransition: null,
+  mapReturnTransition: null,
   audioEnabled: true,
   audioSettings: getInitialAudioSettings(),
   secretCue: defaultSecretCue,
+  onboardingStatus: getInitialOnboardingStatus(),
+  onboardingStepId: null,
+  onboardingSpotlightNodeId: null,
   nodes: [],
   channels: [],
   recentEvents: [],
@@ -288,6 +379,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       recentEvents,
       headlineCounts,
       selectedNodeId: nextNodes[0]?.id ?? null,
+      onboardingSpotlightNodeId: resolveOnboardingSpotlightNodeId(nextNodes),
       invalidNodeRouteId: null,
       secretCue: defaultSecretCue,
     });
@@ -299,15 +391,24 @@ export const useAppStore = create<AppState>((set, get) => ({
       const hasMapSearchNode =
         state.mapSearchTransition !== null &&
         nextNodes.some((node) => node.id === state.mapSearchTransition?.nodeId);
+      const hasMapReturnNode =
+        state.mapReturnTransition !== null &&
+        nextNodes.some((node) => node.id === state.mapReturnTransition?.nodeId);
+      const nextOnboardingSpotlightNodeId = resolveOnboardingSpotlightNodeId(
+        nextNodes,
+        state.onboardingSpotlightNodeId
+      );
 
       return {
         nodes: nextNodes,
         channels,
         headlineCounts,
         selectedNodeId: hasSelectedNode ? state.selectedNodeId : (nextNodes[0]?.id ?? null),
+        onboardingSpotlightNodeId: nextOnboardingSpotlightNodeId,
         activeScene: hasSelectedNode ? state.activeScene : "map",
         nodeSceneEnteredAt: hasSelectedNode ? state.nodeSceneEnteredAt : null,
         mapSearchTransition: hasMapSearchNode ? state.mapSearchTransition : null,
+        mapReturnTransition: hasMapReturnNode ? state.mapReturnTransition : null,
         invalidNodeRouteId: state.invalidNodeRouteId,
       };
     });
@@ -355,6 +456,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: null,
       nodeSceneEnteredAt: null,
       mapSearchTransition: null,
+      mapReturnTransition: null,
       invalidNodeRouteId: null,
       networkStatus: "loading",
       networkError: null,
@@ -385,6 +487,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       activeScene: "node",
       nodeSceneEnteredAt: state.activeScene === "node" ? state.nodeSceneEnteredAt : Date.now(),
       mapSearchTransition: null,
+      mapReturnTransition: null,
       invalidNodeRouteId: null,
       secretCue: defaultSecretCue,
     }));
@@ -396,6 +499,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         nodeId,
         startedAt: Date.now(),
       },
+      mapReturnTransition: null,
       secretCue: defaultSecretCue,
     });
   },
@@ -403,13 +507,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ mapSearchTransition: null });
   },
   goToMap: () => {
-    set({
+    set((state) => ({
       activeScene: "map",
       nodeSceneEnteredAt: null,
       mapSearchTransition: null,
+      mapReturnTransition:
+        state.activeScene === "node" && state.selectedNodeId
+          ? {
+              nodeId: state.selectedNodeId,
+              startedAt: Date.now(),
+            }
+          : null,
       invalidNodeRouteId: null,
       secretCue: defaultSecretCue,
-    });
+    }));
   },
   setAudioSettings: (nextSettings) => {
     set((state) => {
@@ -434,6 +545,84 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
 
     set({ audioEnabled: nextEnabled });
+  },
+  startOnboarding: () => {
+    set((state) => ({
+      activeScene: "map",
+      nodeSceneEnteredAt: null,
+      mapSearchTransition: null,
+      mapReturnTransition: null,
+      invalidNodeRouteId: null,
+      secretCue: defaultSecretCue,
+      onboardingStatus: "active",
+      onboardingStepId: ONBOARDING_STEP_ORDER[0] ?? null,
+      onboardingSpotlightNodeId: resolveOnboardingSpotlightNodeId(
+        state.nodes,
+        state.onboardingSpotlightNodeId
+      ),
+    }));
+  },
+  previousOnboardingStep: () => {
+    const currentStep = get().onboardingStepId;
+    const previousStep = getPreviousOnboardingStep(currentStep);
+
+    if (!previousStep) {
+      return;
+    }
+
+    set({
+      onboardingStatus: "active",
+      onboardingStepId: previousStep,
+    });
+  },
+  nextOnboardingStep: () => {
+    const currentStep = get().onboardingStepId;
+    const nextStep = getNextOnboardingStep(currentStep);
+
+    if (!nextStep) {
+      get().completeOnboarding();
+      return;
+    }
+
+    set({
+      onboardingStatus: "active",
+      onboardingStepId: nextStep,
+    });
+  },
+  skipOnboarding: () => {
+    persistOnboardingStatus("dismissed");
+    set({
+      onboardingStatus: "dismissed",
+      onboardingStepId: null,
+    });
+  },
+  completeOnboarding: () => {
+    persistOnboardingStatus("completed");
+    set({
+      onboardingStatus: "completed",
+      onboardingStepId: null,
+    });
+  },
+  replayOnboarding: () => {
+    set((state) => ({
+      activeScene: "map",
+      nodeSceneEnteredAt: null,
+      mapSearchTransition: null,
+      mapReturnTransition: null,
+      invalidNodeRouteId: null,
+      secretCue: defaultSecretCue,
+      onboardingStatus: "active",
+      onboardingStepId: ONBOARDING_STEP_ORDER[0] ?? null,
+      onboardingSpotlightNodeId: resolveOnboardingSpotlightNodeId(
+        state.nodes,
+        state.onboardingSpotlightNodeId
+      ),
+    }));
+  },
+  setOnboardingSpotlightNode: (nodeId) => {
+    set((state) => ({
+      onboardingSpotlightNodeId: resolveOnboardingSpotlightNodeId(state.nodes, nodeId),
+    }));
   },
   beginSecretWord: (word, initialChar) => {
     set({

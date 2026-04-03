@@ -2,6 +2,8 @@ export function easeOutCubic(progress: number) {
   return 1 - Math.pow(1 - progress, 3);
 }
 
+export const MAP_RETURN_TRANSITION_MS = 1150;
+
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -32,5 +34,18 @@ export function getNodeEntryState(enteredAt: number | null, now: number) {
     lineEntryProgress,
     lineEntryEase,
     mapFade: 1 - entryEase,
+  };
+}
+
+export function getMapReturnState(startedAt: number | null, now: number) {
+  const progress = startedAt ? clamp((now - startedAt) / MAP_RETURN_TRANSITION_MS, 0, 1) : 1;
+  const easedReturn = easeOutCubic(progress);
+  const remaining = 1 - easedReturn;
+
+  return {
+    progress,
+    easedReturn,
+    remaining,
+    isActive: remaining > 0.001,
   };
 }

@@ -5,9 +5,11 @@ import { getNodeViewLayoutSeed } from "../../lib/node-view-layout";
 import { createMapSceneLayer, findMapNodeAtPoint, renderMapScene } from "./pixi-map-scene";
 import type { NodeSceneLayer } from "./pixi-node-scene";
 import type { CollisionBurst, RenderSnapshot, VisualProfile } from "./pixi-types";
+import { getMapReturnState } from "./pixi-transition-layer";
 
 const MAX_COLLISION_HISTORY_SIZE = 2000;
 const MAX_COLLISION_BURSTS = 200;
+const MAX_RENDER_DPR = 3;
 
 type PixiSurfaceOptions = {
   root: HTMLElement;
@@ -31,6 +33,7 @@ export class PixiSurface {
   private snapshot: RenderSnapshot = {
     activeScene: "map",
     mapSearchTransition: null,
+    mapReturnTransition: null,
     nodeSceneEnteredAt: null,
     nodes: [],
     channels: [],
@@ -46,6 +49,8 @@ export class PixiSurface {
       promptReleaseAt: null,
       promptHideAt: null,
     },
+    onboardingStepId: null,
+    onboardingSpotlightNodeId: null,
   };
   private localLayoutSeed = 0;
   private hoveredNodeId: string | null = null;
@@ -57,7 +62,10 @@ export class PixiSurface {
   } | null = null;
   private width = 0;
   private height = 0;
-  private dpr = 0;
+  private dpr = Math.min(
+    typeof window === "undefined" ? 1 : window.devicePixelRatio || 1,
+    MAX_RENDER_DPR
+  );
   private projection: WorldMapProjection = createWorldMapProjection(1, 1);
   private resizeObserver: ResizeObserver | null = null;
   private destroyed = false;
@@ -181,7 +189,7 @@ export class PixiSurface {
     const rect = this.options.root.getBoundingClientRect();
     const nextWidth = Math.max(1, Math.round(rect.width));
     const nextHeight = Math.max(1, Math.round(rect.height));
-    const nextDpr = Math.min(window.devicePixelRatio || 1, 2);
+    const nextDpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
     const rendererWidth = Math.round(this.app.renderer.screen.width);
     const rendererHeight = Math.round(this.app.renderer.screen.height);
     const rendererDpr = this.app.renderer.resolution;
@@ -264,6 +272,11 @@ export class PixiSurface {
 
   private bindPointerEvents() {
     this.handlePointerMove = (event: PointerEvent) => {
+      const mapReturnState = getMapReturnState(
+        this.snapshot.mapReturnTransition?.startedAt ?? null,
+        Date.now()
+      );
+
       if (this.snapshot.activeScene !== "map") {
         if (this.snapshot.activeScene === "node") {
           const peerNode = this.findPeerNodeAtPointer(event.clientX, event.clientY, {
@@ -280,6 +293,12 @@ export class PixiSurface {
         this.app.canvas.style.cursor = "default";
         this.hoveredNodeId = null;
         this.hoveredPeerNodeId = null;
+        return;
+      }
+
+      if (mapReturnState.isActive) {
+        this.app.canvas.style.cursor = "default";
+        this.hoveredNodeId = null;
         return;
       }
 
@@ -300,6 +319,11 @@ export class PixiSurface {
     };
 
     this.handleClick = (event: MouseEvent) => {
+      const mapReturnState = getMapReturnState(
+        this.snapshot.mapReturnTransition?.startedAt ?? null,
+        Date.now()
+      );
+
       if (this.snapshot.activeScene !== "map") {
         if (this.snapshot.activeScene === "node") {
           const peerNode = this.findPeerNodeAtPointer(event.clientX, event.clientY, {
@@ -310,6 +334,10 @@ export class PixiSurface {
             this.options.selectNode(peerNode.id);
           }
         }
+        return;
+      }
+
+      if (mapReturnState.isActive) {
         return;
       }
 
@@ -359,10 +387,20 @@ export class PixiSurface {
     }
 
     if (this.snapshot.activeScene === "map") {
+      const isOnboardingHover =
+        this.snapshot.onboardingStepId === "connected-node" &&
+        this.snapshot.onboardingSpotlightNodeId !== null;
+      const effectiveHoveredNodeId = isOnboardingHover
+        ? this.snapshot.onboardingSpotlightNodeId
+        : this.hoveredNodeId;
+
       renderMapScene(
         this.mapLayer,
         this.snapshot,
-        { hoveredNodeId: this.hoveredNodeId },
+        {
+          hoveredNodeId: effectiveHoveredNodeId,
+          isOnboardingHover,
+        },
         context,
         this.options.getVisualProfile
       );
@@ -391,26 +429,39 @@ export class PixiSurface {
       this.collisionBursts,
       {
         emitCollisionEcho: (leftRipple, rightRipple, collisionKey) => {
-          const collisionEvent: EchoEvent = {
+          const selectedNodeId = this.snapshot.selectedNodeId;
+          if (!selectedNodeId) {
+            return;
+          }
+
+          const collisionNodeId =
+            leftRipple.intensity >= rightRipple.intensity ? leftRipple.nodeId : rightRipple.nodeId;
+          const event: EchoEvent = {
             id: `collision-${collisionKey}`,
             type: "node_active",
             at: new Date().toISOString(),
-            nodeId:
-              leftRipple.intensity >= rightRipple.intensity
-                ? leftRipple.nodeId
-                : rightRipple.nodeId,
-            intensity: 0.14,
-            batchRole: "tail",
+            nodeId: collisionNodeId,
+            intensity: Math.max(
+              0.12,
+              Math.min(0.28, Math.max(leftRipple.intensity, rightRipple.intensity) * 0.26)
+            ),
+            registerBand: 2,
             source: "resonance",
+            batchId:
+              leftRipple.batchId &&
+              rightRipple.batchId &&
+              leftRipple.batchId === rightRipple.batchId
+                ? leftRipple.batchId
+                : undefined,
+            batchRole: "tail",
             rippleLayer: Math.max(leftRipple.rippleLayer, rightRipple.rippleLayer) + 1,
           };
 
-          this.options.appendEvent(collisionEvent);
-          this.options.triggerEvent(collisionEvent);
+          this.options.appendEvent(event);
+          this.options.triggerEvent(event);
         },
       },
-      this.options.getVisualProfile,
-      2
+      this.options.getVisualProfile
     );
 
     // Evict oldest collision history entries to prevent unbounded memory growth.

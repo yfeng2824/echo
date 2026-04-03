@@ -1,7 +1,7 @@
 import { CanvasSource, Sprite, Texture } from "pixi.js";
 import type { RenderContext } from "./pixi-types";
 
-const MAX_TEXTURE_DPR = 2;
+const MAX_TEXTURE_DPR = 3;
 
 export type ProjectionTextureLayer = {
   mapSprite: Sprite;
